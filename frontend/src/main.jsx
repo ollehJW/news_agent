@@ -1,0 +1,147 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { UserRound, ArrowRight, ArrowLeft, Check, ChevronRight, Plus, X, Sparkles, Globe2, FileText, Layers3, Search, CalendarClock, CalendarDays, Download, ExternalLink, Loader2, CircleHelp, SlidersHorizontal, Bookmark, RotateCcw, Radio, Hash, CheckCheck } from 'lucide-react';
+import { initialDates } from './lib';
+import { DomainBox, DomainRecommendationModal } from './DomainSetup';
+import Scheduling from './Scheduling';
+import NewsSelection from './NewsSelection';
+import AuthGate from './Auth';
+import { authRequest, postAuth } from './authApi';
+import './styles.css';
+import './scheduling.css';
+import './readability.css';
+
+const steps = ['주제·도메인 설정', '수집 기간 설정', '뉴스 분석·선정', '뉴스레터 완성'];
+const weights = [['기술적 중요성',35],['기술 주체 경쟁력',30],['파급력',25],['최신성',10]];
+function Button({children, primary, className='', ...props}) { return <button className={`button ${primary?'primary':''} ${className}`} {...props}>{children}</button>; }
+function App({user,onLogout}) {
+  const runRef = useRef(null);
+  const [topic,setTopic] = useState('');
+  const [dates,setDates] = useState(initialDates);
+  const [step,setStep] = useState(0);
+  const [domains,setDomains] = useState([]);
+  const [modal,setModal] = useState(false);
+  const [candidates,setCandidates] = useState([]);
+  const [pending,setPending] = useState(false);
+  const [generated,setGenerated] = useState(null);
+  const [issues,setIssues] = useState([]);
+  const [progress,setProgress] = useState(-1);
+  const [view,setView] = useState('studio');
+  const title = topic.trim();
+  const [toast,setToast] = useState('');
+  const [error,setError] = useState('');
+  const [saved,setSaved] = useState([]);
+  const [opened,setOpened] = useState(null);
+  const busy = pending || (progress>=0 && progress<3);
+  useEffect(()=>{let active=true;authRequest('/newsletters').then(rows=>{if(active)setSaved(rows);}).catch(err=>{if(active)setError(err.message);});return()=>{active=false;};},[]);
+  useEffect(()=>{if(!toast)return; const id=setTimeout(()=>setToast(''),3500);return()=>clearTimeout(id)},[toast]);
+  function updateTopic(value) {setTopic(value);setError('');}
+  async function ensureRun() {
+    if(runRef.current?.topic===topic.trim())return runRef.current.id;
+    const data=await postAuth('/runs',{topic:topic.trim()});
+    runRef.current={id:data.run_id,topic:topic.trim()};return data.run_id;
+  }
+  async function syncSources(id,items) {
+    const result=await authRequest(`/runs/${id}/sources`,{method:'PUT',body:JSON.stringify({domains:items.map(d=>({host:d.host,custom:d.custom||d.runId!==id,run_domain_id:d.runId===id?d.run_domain_id:undefined}))})});
+    const mapped=result.map(d=>({...d,runId:id}));setDomains(mapped);return mapped;
+  }
+  async function changeDomains(items) {
+    if(pending)return;
+    if(!topic.trim()){setDomains(items);return;}
+    setPending(true);setError('');
+    try{await syncSources(await ensureRun(),items);}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  function validSources() {
+    if(!topic.trim() || topic.trim().length>120){setError('관심 주제를 1~120자로 입력해 주세요.');return false;}
+    if(!domains.length){setError('수집할 도메인을 1개 이상 추가해 주세요.');return false;}
+    return true;
+  }
+  async function openDomains() {
+    if(!topic.trim() || topic.trim().length>120){setError('관심 주제를 1~120자로 입력해 주세요.');return;}
+    setPending(true);setError('');
+    try{await syncSources(await ensureRun(),domains);setModal(true);}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  async function addRecommended(selected) {
+    setPending(true);setError('');
+    try{const merged=new Map(domains.map(d=>[d.host,d]));for(const domain of selected)if(!merged.has(domain.host))merged.set(domain.host,{...domain,runId:runRef.current.id});await syncSources(runRef.current.id,[...merged.values()]);setModal(false);}catch(err){setError(err.message);throw err;}finally{setPending(false);}
+  }
+  async function nextPeriod() {
+    if(!validSources())return;
+    setPending(true);setError('');
+    try{const id=await ensureRun();await syncSources(id,domains);await authRequest(`/runs/${id}/period`,{method:'PUT',body:JSON.stringify(dates)});setStep(1);}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  async function collect() {
+    if(!validSources()){setStep(0);return;}
+    if(!dates.start||!dates.end||dates.start>dates.end){setError('수집 시작일과 종료일을 확인해 주세요.');return;}
+    setError('');setPending(true);setStep(2);setProgress(0);setCandidates([]);setIssues([]);setGenerated(null);
+    try{const id=await ensureRun();await syncSources(id,domains);await authRequest(`/runs/${id}/period`,{method:'PUT',body:JSON.stringify(dates)});const result=await postAuth(`/runs/${id}/collect-demo`);setCandidates(result.issues);setIssues(result.issues.filter(n=>n.selected));setProgress(3);}catch(err){setError(err.message);setProgress(-1);setStep(1);}finally{setPending(false);}
+  }
+  async function toggleIssue(id) {
+    if(pending)return;
+    const selectedIds=new Set(issues.map(n=>n.id));if(selectedIds.has(id))selectedIds.delete(id);else selectedIds.add(id);
+    setPending(true);setError('');
+    try{await authRequest(`/runs/${runRef.current.id}/selection`,{method:'PUT',body:JSON.stringify({issue_ids:[...selectedIds]})});setIssues(candidates.filter(n=>selectedIds.has(n.id)));setGenerated(null);}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  async function makeNewsletter() {
+    setPending(true);setError('');
+    try{const letter=await postAuth(`/runs/${runRef.current.id}/newsletter`);setGenerated(letter);setStep(3);}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  async function previousStep() {
+    setPending(true);setError('');
+    try{await postAuth(`/runs/${runRef.current.id}/step`,{step:step-1});setStep(step-1);}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  const html=generated?.html||'';
+  async function download(letter=generated) {
+    if(!letter)return;
+    setPending(true);
+    try{const response=await fetch(`/api/newsletters/${letter.id}/download`);if(!response.ok){if(response.status===401)window.dispatchEvent(new Event('wianews-session-expired'));throw new Error('다운로드하지 못했습니다. 다시 시도해 주세요.');}const url=URL.createObjectURL(await response.blob());const a=document.createElement('a');a.href=url;a.download='wianews.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setToast('HTML 파일을 다운로드했습니다.');}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  async function save() {
+    if(!generated)return;
+    setPending(true);setError('');
+    try{const entry=await postAuth(`/newsletters/${generated.id}/save`);setGenerated(entry);setSaved(current=>[entry,...current.filter(n=>n.id!==entry.id)]);setToast('뉴스레터를 보관함에 저장했습니다.');}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  function reset(){runRef.current=null;setStep(0);setProgress(-1);setCandidates([]);setIssues([]);setGenerated(null);setOpened(null);setError('');setView('studio');}
+  return <div className="app-shell">
+    <aside className="sidebar">
+      <a className="brand" href="#" onClick={e=>{e.preventDefault();setView('studio')}}><span className="brand-icon"><Layers3 size={24}/></span><div>WiaNews<small>NEWSLETTER AGENT</small></div></a>
+      <div className="workspace-label">WORKSPACE</div>
+      <nav><button className={view==='studio'?'active':''} onClick={()=>{setView('studio');setOpened(null)}}><Sparkles size={17}/>뉴스레터 만들기<ChevronRight size={14}/></button><button className={view==='archive'?'active':''} onClick={()=>{setView('archive');setOpened(null)}}><Bookmark size={17}/>뉴스레터 보관함<span className="nav-count">{saved.length}</span></button><button className={view==='schedules'?'active':''} onClick={()=>{setView('schedules');setOpened(null)}}><CalendarClock size={17}/>구독 관리</button></nav>
+      <div className="side-bottom"><div className="profile"><span aria-hidden="true"><UserRound size={20}/></span><div>{user.full_name}<small>{user.team_name}</small></div><span className="online"/></div><button className="sidebar-logout" onClick={onLogout}>로그아웃</button></div>
+    </aside>
+    <div className="main-shell"><header className="topbar"><div>Workspace<ChevronRight size={13}/><strong>{view==='studio'?'뉴스레터 만들기':view==='schedules'?'구독 관리':'뉴스레터 보관함'}</strong></div></header>
+    <main>
+      <div className="page-heading"><div><div className="eyebrow">YOUR WEEKLY TECH INTELLIGENCE</div><h1>{view==='schedules'?'구독 관리':view==='archive'?'뉴스레터 보관함':'기술의 흐름을, 한눈에.'}</h1><p>{view==='schedules'?'관심 있는 뉴스레터를 구독하고, 원하는 주기와 시간을 설정하세요.':view==='archive'?'직접 만든 뉴스레터를 다시 확인하고 다운로드하세요.':'관심 있는 주제 하나를 알려주세요. 꼭 알아야 할 기술 소식을 Agent가 정리합니다.'}</p></div></div>
+      {error&&<p className="error" role="alert">{error}</p>}
+      {view==='schedules'?<Scheduling storageKey={`wianews-schedules-v1:${user.user_id}`} newsletters={saved} notify={setToast}/>:view==='archive'? <section className="panel archive"><div className="section-title"><h2>저장한 뉴스레터 <span className="count">{saved.length}</span></h2><Button disabled={pending} onClick={reset}><Plus size={15}/>새 뉴스레터</Button></div>{opened?<><Button onClick={()=>setOpened(null)}><ArrowLeft size={15}/>목록으로</Button><div className="preview-toolbar"><strong>{opened.title}</strong><Button disabled={pending} onClick={()=>download(opened)}><Download size={15}/>HTML 다운로드</Button></div><iframe title="저장된 뉴스레터" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={opened.html}/></>:saved.length?saved.map(s=><div className="archive-row" key={s.id}><span className="tile-icon"><FileText size={22}/></span><div><h3>{s.title}</h3><p>{s.date} · 핵심 이슈 {s.count}개 · HTML</p></div><Button onClick={()=>setOpened(s)}>열기<ArrowRight size={14}/></Button></div>):<div className="empty"><Bookmark size={36}/><h3>아직 저장한 뉴스레터가 없어요</h3><p>뉴스레터를 완성한 뒤 보관함에 저장해 보세요.</p><Button primary onClick={reset}>첫 뉴스레터 만들기<ArrowRight size={15}/></Button></div>}</section>:<>
+      <div className="stepper">{steps.map((s,i)=><React.Fragment key={s}><div className={`step ${step===i?'active':''} ${step>i?'done':''}`}><span>{step>i?<Check size={15}/>:String(i+1).padStart(2,'0')}</span><div><small>STEP {i+1}</small><b>{s}</b></div></div>{i<3&&<div className="step-line"/>}</React.Fragment>)}</div>
+      <div className="setup-grid studio-grid"><div className="studio-content">{step===0?<div className="setup-main"><section className="panel keyword-panel topic-panel"><div className="section-title"><div className="section-label"><span className="tile-icon"><Hash size={20}/></span><div><h2>어떤 주제를 살펴볼까요?</h2><p>뉴스레터로 받아보고 싶은 주제 하나를 입력해 주세요.</p></div></div></div>
+        <label className="field-label" htmlFor="topic-input">뉴스레터 주제 <span>{topic.length}/120자</span></label>
+        <div className="keyword-input"><Search size={18}/><input id="topic-input" placeholder="예: 기업에서 활용하는 AI Agent 기술 동향" value={topic} disabled={pending} maxLength={120} onChange={e=>updateTopic(e.target.value)} aria-describedby="topic-hint"/></div>
+        <p id="topic-hint" className="hint topic-hint">하나의 주제를 자유롭게 적어 주세요. 관심 분야와 살펴볼 관점을 함께 쓰면 좋아요.</p>
+        <div className="suggestions"><span><Sparkles size={13}/>주제 예시</span>{['AI Agent의 기업 활용','React 기반 웹 개발 동향','클라우드 보안 기술'].map(example=><button key={example} disabled={pending} onClick={()=>updateTopic(example)}>{example}</button>)}</div>
+      </section>
+      <DomainBox domains={domains} disabled={pending} onChange={changeDomains} onRecommend={openDomains}/>
+      
+      
+      </div>
+:step===1?<section className="panel period-panel">
+        <div className="section-title"><div className="section-label"><span className="tile-icon"><CalendarDays size={20}/></span><div><h2>어느 기간의 뉴스를 모을까요?</h2><p>뉴스 수집 시작일과 종료일을 설정하세요.</p></div></div><span className="eyebrow">STEP 02</span></div>
+        <label className="field-label">뉴스 수집 기간</label><div className="period"><div className="date-field"><CalendarDays size={16}/><input aria-label="수집 시작일" type="date" value={dates.start} max={dates.end} onChange={e=>setDates({...dates,start:e.target.value})}/><span>—</span><input aria-label="수집 종료일" type="date" min={dates.start} value={dates.end} onChange={e=>setDates({...dates,end:e.target.value})}/></div><Button onClick={()=>setDates(initialDates())}>최근 7일</Button></div><p className="hint period-hint">시작일과 종료일을 포함한 기간의 뉴스를 수집합니다.</p>
+        
+      </section>:step===2?<>
+        <NewsSelection candidates={candidates} selected={issues} busy={progress>=0&&progress<3} disabled={pending} onToggle={toggleIssue}/>
+      </>:<section className="panel newsletter-panel"><div className="section-title"><div><div className="eyebrow">READY TO READ</div><h2>이번 주의 기술 뉴스레터가 완성됐어요.</h2></div></div><div className="newsletter-controls"><Button disabled={pending||!generated} onClick={save}><Bookmark size={15}/>보관함에 저장</Button><Button primary disabled={pending||!generated} onClick={()=>download()}><Download size={15}/>HTML 다운로드</Button></div><div className="preview-toolbar"><span><span className="preview-dot"/> HTML 미리보기</span></div><iframe title="뉴스레터 HTML 미리보기" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={html}/></section>}
+      <nav className="step-navigation" aria-label="단계 이동">
+        <div className="step-navigation-back">{step>0&&<Button disabled={busy} onClick={previousStep}><ArrowLeft size={15}/>이전 · {steps[step-1]}</Button>}</div>
+        <div className="step-navigation-next">{step===0?<Button primary disabled={busy} onClick={nextPeriod}>다음 · 수집 기간 설정<ArrowRight size={15}/></Button>:step===1?<Button primary disabled={busy} onClick={collect}>뉴스 수집 시작<ArrowRight size={15}/></Button>:step===2?<Button primary disabled={busy||!issues.length} onClick={makeNewsletter}>뉴스레터 만들기<ArrowRight size={15}/></Button>:<Button disabled={pending} onClick={reset}><RotateCcw size={15}/>새로 만들기</Button>}</div>
+      </nav>
+      </div><aside className="right-column"><section className="panel outcome"><div className="eyebrow">LESS NOISE, MORE SIGNAL</div><h2>읽어야 할 뉴스만,<br/>잘 정리된 한 통으로.</h2><p>여러 사이트를 오갈 필요 없이<br/>기술의 변화와 핵심 소식을 함께.</p><div className="mini-letter"><div className="mini-letter-top"><span>WiaNews</span><span>WEEKLY ↗</span></div><b>이번 주 기술 인사이트</b><div className="mini-summary"><span/><span/></div>{[1,2,3].map(i=><div className="mini-item" key={i}><em>0{i}</em><div><span/><span/></div></div>)}<div className="mini-bottom">CURATED BY YOUR AGENT</div></div><div className="outcome-bottom"><CheckCheck size={16}/>핵심 요약 · 선정 이슈 · 출처 링크</div></section><section className="panel criteria"><div className="section-title"><h3><SlidersHorizontal size={16}/>이렇게 선정해요</h3><span>100점 기준</span></div>{weights.map(([name,w])=><div className="weight" key={name}><span title={name==='기술 주체 경쟁력'?'보도 매체가 아닌 개발기업·연구주체의 규모, 기술력, 연구 성과 및 시장 경쟁력':undefined}>{name}</span><div><i style={{width:`${w*2}%`}}/></div><b>{w}%</b></div>)}<p>중요도 순으로 상위 5개를 기본 선택합니다. 최종 후보는 직접 변경할 수 있습니다.</p></section></aside></div>
+      </>}
+      <footer className="page-footer"><span>WiaNews <span>·</span> 기술을 읽는 더 나은 방법</span><span>Designed for your next idea.</span></footer>
+    </main></div>
+    {modal&&<DomainRecommendationModal runId={runRef.current?.id} saving={pending} topic={topic.trim()} existing={domains} onClose={()=>setModal(false)} onAdd={addRecommended}/>}
+    {toast&&<div className="toast" role="status"><Check size={17}/>{toast}</div>}
+  </div>;
+}
+createRoot(document.getElementById('root')).render(<AuthGate>{(user,onLogout)=><App key={user.user_id} user={user} onLogout={onLogout}/>}</AuthGate>);

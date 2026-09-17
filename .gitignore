@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+backend/logs/
+
+# Local account database and SQLite sidecars
+backend/app.db*
