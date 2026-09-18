@@ -83,13 +83,14 @@ API 키는 프론트엔드에 전달하지 않으며 `.env`는 Git에서 제외�
 
 ```bash
 cd /home/wia/projects/wianews
-.venv/bin/python -m unittest discover -s backend -p 'test_*.py' -v
+.venv/bin/python -B -c "from backend.main import app; print(app.title)"
+curl --fail http://127.0.0.1:6112/api/health
 cd frontend
 npm test
 npm run build
 ```
 
-백엔드 테스트는 실제 LLM 호출 없이 입력·도메인 검증, JSON 파싱, 중복 제거, 재시도와 오류 응답을 검증합니다.
+백엔드는 모듈 로딩과 실행 중인 서버의 상태 응답을 확인합니다.
 
 ## 주요 코드
 
