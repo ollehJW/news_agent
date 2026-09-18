@@ -12,9 +12,9 @@ export function DomainBox({ domains, onChange, onRecommend, disabled=false }) {
     event.preventDefault();
     try {
       const host = normalizeDomain(input);
-      if (domains.some(d => d.host === host)) throw new Error('이미 목록에 추가된 도메인이에요.');
+      if (domains.some(d => normalizeDomain(d.host) === host)) { setInput(''); setError(''); return; }
       if (domains.length >= LIMIT) throw new Error('도메인은 최대 20개까지 추가할 수 있어요.');
-      onChange([...domains, { host, name: host, mark: host[0].toUpperCase(), kind: '직접 추가', custom: true,
+      onChange([...domains, { host, name: host, mark: host[0].toUpperCase(), kind: 'manual', custom: true,
         desc: '사용자가 등록한 수집 출처', reason: '운영 주체와 출처 공개 여부를 직접 확인해 주세요.' }]);
       setInput(''); setError('');
     } catch (err) { setError(err.message); }
@@ -40,7 +40,7 @@ export function DomainBox({ domains, onChange, onRecommend, disabled=false }) {
   </section>;
 }
 
-export function DomainRecommendationModal({ topic, existing, onClose, onAdd, runId, saving=false }) {
+export function DomainRecommendationModal({ topic, existing, onClose, onAdd, sampleId, saving=false }) {
   const dialog = useRef(null);
   const allCheckbox = useRef(null);
   const selectIncoming = useRef(true);
@@ -62,10 +62,10 @@ export function DomainRecommendationModal({ topic, existing, onClose, onAdd, run
     const timeout = setTimeout(()=>controller.abort(),135000);
     streamRecommendedDomains(topic,controller.signal,domain=>{
       if(active) setItems(items=>[...items,{...domain,selected:selectIncoming.current}]);
-    },runId).catch(err=>{if(active)setRequestError(err.name==='AbortError'?'추천 시간이 초과되었습니다. 받은 후보를 추가하거나 다시 추천받을 수 있어요.':err.message);})
+    },sampleId).catch(err=>{if(active)setRequestError(err.name==='AbortError'?'추천 시간이 초과되었습니다. 받은 후보를 추가하거나 다시 추천받을 수 있어요.':err.message);})
       .finally(()=>{clearTimeout(timeout);if(active)setLoading(false);});
     return()=>{active=false;clearTimeout(timeout);controller.abort();};
-  },[topic,attempt,runId]);
+  },[topic,attempt,sampleId]);
   useEffect(()=>{const previous=document.activeElement;dialog.current.showModal();return()=>previous?.focus();},[]);
   useEffect(()=>{allCheckbox.current.indeterminate=selected.length>0&&!allSelected;},[selected.length,allSelected]);
 

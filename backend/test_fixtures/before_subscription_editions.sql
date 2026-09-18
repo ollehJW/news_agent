@@ -1,3 +1,10 @@
+CREATE TABLE IF NOT EXISTS newsletter_runs (
+ run_id TEXT PRIMARY KEY, sample_id TEXT REFERENCES sample_newsletters(sample_id) ON DELETE SET NULL, user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+ topic TEXT NOT NULL, start_date TEXT, end_date TEXT, current_step INTEGER NOT NULL DEFAULT 0,
+ status TEXT NOT NULL DEFAULT 'draft', data_mode TEXT NOT NULL DEFAULT 'demo',
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT, error_message TEXT
+);
+CREATE INDEX IF NOT EXISTS runs_owner ON newsletter_runs(user_id,created_at);
 CREATE TABLE IF NOT EXISTS domains (
  domain_id TEXT PRIMARY KEY, host TEXT NOT NULL UNIQUE,
  created_at TEXT NOT NULL
@@ -9,7 +16,7 @@ CREATE TABLE IF NOT EXISTS sample_newsletters (
  collection_start_date TEXT, collection_end_date TEXT,
  status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','completed')),
  html_content TEXT, created_at TEXT NOT NULL, completed_at TEXT, saved_at TEXT,
- last_issued_newsletter_id TEXT REFERENCES subscripted_newsletters(newsletter_id) ON DELETE SET NULL,
+ last_issued_newsletter_id TEXT REFERENCES newsletters(newsletter_id) ON DELETE SET NULL,
  CHECK(collection_start_date IS NULL OR collection_end_date IS NULL OR collection_end_date>=collection_start_date),
  CHECK(status!='completed' OR (html_content IS NOT NULL AND completed_at IS NOT NULL))
 );
@@ -47,29 +54,27 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 CREATE INDEX IF NOT EXISTS subscriptions_reference ON subscriptions(sample_id,status);
 
--- One shared edition per sample and coverage period.
-CREATE TABLE IF NOT EXISTS subscripted_newsletters (
+-- Actual subscription editions are shared outputs, independent of sample ownership.
+CREATE TABLE IF NOT EXISTS newsletters (
  newsletter_id TEXT PRIMARY KEY,
- sample_id TEXT NOT NULL REFERENCES sample_newsletters(sample_id) ON DELETE RESTRICT,
- coverage_start_date TEXT NOT NULL,
- coverage_end_date TEXT NOT NULL CHECK(coverage_end_date>=coverage_start_date),
- issue_ids TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(issue_ids) AND json_type(issue_ids)='array'),
- summary TEXT,
- request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
- html_content TEXT NOT NULL,
- created_at TEXT NOT NULL, published_at TEXT,
- UNIQUE(sample_id,coverage_start_date,coverage_end_date)
+ title TEXT NOT NULL, html_content TEXT NOT NULL, template_version TEXT NOT NULL,
+ content_hash TEXT NOT NULL, issue_count INTEGER NOT NULL CHECK(issue_count>=0),
+ snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS subscripted_newsletters_sample ON subscripted_newsletters(sample_id,published_at);
-CREATE INDEX IF NOT EXISTS subscripted_newsletters_request ON subscripted_newsletters(request_id);
 
-CREATE TABLE IF NOT EXISTS subscription_history (
- subscription_id TEXT NOT NULL REFERENCES subscriptions(subscription_id) ON DELETE RESTRICT,
- newsletter_id TEXT NOT NULL REFERENCES subscripted_newsletters(newsletter_id) ON DELETE RESTRICT,
- created_at TEXT NOT NULL,
- PRIMARY KEY(subscription_id,newsletter_id)
+CREATE TABLE IF NOT EXISTS newsletter_publications (
+ publication_id TEXT PRIMARY KEY,
+ sample_id TEXT NOT NULL REFERENCES sample_newsletters(sample_id) ON DELETE RESTRICT,
+ coverage_start TEXT NOT NULL, coverage_end TEXT NOT NULL CHECK(coverage_end>=coverage_start),
+ newsletter_id TEXT UNIQUE REFERENCES newsletters(newsletter_id) ON DELETE SET NULL,
+ selected_article_ids TEXT NOT NULL DEFAULT '[]'
+   CHECK(json_valid(selected_article_ids) AND json_type(selected_article_ids)='array'),
+ status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','completed','failed')),
+ published_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ UNIQUE(sample_id,coverage_start,coverage_end)
 );
-CREATE INDEX IF NOT EXISTS subscription_history_newsletter ON subscription_history(newsletter_id);
+CREATE INDEX IF NOT EXISTS publications_status ON newsletter_publications(status,created_at);
+
 
 CREATE TABLE IF NOT EXISTS sample_domains (
  sample_id TEXT NOT NULL REFERENCES sample_newsletters(sample_id) ON DELETE CASCADE,
@@ -129,15 +134,3 @@ CREATE TABLE IF NOT EXISTS subscripted_issues (
 CREATE INDEX IF NOT EXISTS subscripted_issues_subscription ON subscripted_issues(subscription_id,created_at);
 CREATE INDEX IF NOT EXISTS subscripted_issues_article ON subscripted_issues(article_id);
 CREATE INDEX IF NOT EXISTS subscripted_issues_request ON subscripted_issues(request_id);
-
-CREATE TABLE IF NOT EXISTS errors (
- error_id TEXT PRIMARY KEY,
- user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
- step TEXT NOT NULL,
- error_type TEXT NOT NULL,
- message TEXT NOT NULL,
- request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
- created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS errors_user_step ON errors(user_id,step,created_at);
-CREATE INDEX IF NOT EXISTS errors_request ON errors(request_id);

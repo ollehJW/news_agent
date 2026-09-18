@@ -1,7 +1,7 @@
 # WiaNews
 
 기술 주제로 수집 출처를 추천하고 뉴스레터를 구성하는 서비스입니다.
-도메인 추천은 Azure OpenAI와 연결되며, 실행·도메인·기사 선택·뉴스레터·사용 이력은 Python 백엔드와 SQLite에 저장합니다.
+도메인 추천은 Azure OpenAI와 연결되며, 실행·도메인·기사 선택·뉴스레터은 Python 백엔드와 SQLite에 저장합니다.
 뉴스 수집과 점수화는 아직 서버의 예시 데이터로 진행하며, 뉴스레터 HTML은 서버 Jinja2 템플릿으로 생성합니다.
 
 ## 실행
@@ -157,25 +157,110 @@ API 변경 요청에는 `X-WiaNews-Request: 1` 헤더가 필요합니다. 브라
 
 ## 뉴스레터 실행 및 사용 기록
 
-서버 시작 시 다음 8개 테이블을 생성합니다(`backend/newsletter_schema.sql`).
+서버 시작 시 뉴스레터 관련 테이블을 생성합니다(`backend/newsletter_schema.sql`).
 
 | 테이블 | 저장 내용 |
 | --- | --- |
-| newsletter_runs | 사용자별 주제, 수집 기간, 진행 단계와 상태 |
-| domains | 공통 도메인 ID·호스트·출처 이름·생성/수정 시점 |
-| run_domains | 추천 회차별 출처 분류·설명·추천 이유·주제 관련성, 선택 여부, 직접 추가 여부 |
-| run_articles | 원문 기사, 발행일, 요약, 대표 이미지 URL·파비콘 URL·이미지 저장 경로 |
-| run_issues | 중복 통합 이슈, 평가 항목별 점수, 순위, 초기·최종 선택 여부 |
-| newsletters | 생성 HTML과 당시 데이터 스냅샷, 보관함 저장 시점 |
-| usage_events | 도메인 변경, 수집, 기사 선택, 생성·저장·다운로드 요청 기록 |
-| ai_requests | run_id별 LLM 호출·재시도·실패·취소, 실제 응답 토큰 사용량 |
+| errors | 사용자별 오류 ID·발생 단계·유형·메시지·LLM 호출 ID·시각 |
+| domains | 공통 도메인 ID·호스트·생성 시점 |
+| sample_domains | 샘플별 선택 도메인·추천 설명·추천 이유·관련성·LLM 호출 ID |
+| sample_articles | 샘플별 수집 기사·본문·요약·대표 이미지 |
+| sample_issues | 기사별 분석 호출·항목 점수·순위·중복 관계·최종 선택 |
+| sample_newsletters | 샘플 주제·수집 기간·상태·HTML·생성/완성/저장 시각 |
+| subscripted_newsletters | 샘플·수집 기간별 공유 발행본·이슈 목록·요약·HTML |
+| llm_requests | 호출별 사용자·단계·모델·토큰·시간 |
 
 - 모든 실행·보관함 API는 소유자를 검사합니다. 초기 비밀번호 변경 전 사용자와 관리자는 뉴스레터 API를 사용할 수 없습니다.
-- 추천은 `run_id`를 받아 기존 실행에 연결하며, 생략하면 새 실행을 생성합니다. 스트리밍 후보는 하나씩 DB에 저장한 후 전달합니다. 선택하지 않은 추천 정보도 남습니다.
-- `/api/runs` 생성·조회, `/api/runs/{run_id}` 상세 조회를 제공합니다. `sources`, `period`, `selection`은 PUT, `collect-demo`, `newsletter`, `step`은 POST입니다.
+- 추천은 `sample_id`를 받아 기존 샘플에 연결하며, 생략하면 새 초안을 생성합니다. 추천 후보는 서명된 토큰으로 전달하고 선택한 출처만 sample_domains에 저장합니다.
+- `/api/samples` 생성·조회, `/api/samples/{sample_id}` 상세 조회를 제공합니다. sources, period, selection은 PUT, collect-demo, newsletter는 POST입니다. 수정 API는 현재 sample_id를 반환하며 완성본 수정 시 새 ID로 바뀝니다. 화면은 반환 ID를 다음 요청에 사용합니다.
+- 진행 단계는 React 상태로 관리합니다. 서버에 current_step·updated_at·error_message 컬럼을 추가하지 않으며, newsletter_runs 및 단계 이동 API는 제거했습니다.
 - `/api/newsletters`는 저장한 뉴스레터 목록이며, `/{newsletter_id}/save`는 POST, `/{newsletter_id}/download`는 GET입니다. 생성 당시 HTML은 이후 재수집해도 유지됩니다.
-- `/api/runs/{run_id}/usage`에서 호출 기록과 사용량 합계를 조회합니다. 공급자가 사용량을 보내지 않은 실패·취소 호출의 토큰은 NULL이며 추정하지 않습니다. 합계는 확인된 사용량만 더합니다.
+- `/api/llm-requests`에서 로그인한 사용자 본인의 호출 기록과 사용량 합계를 조회합니다. 공급자가 사용량을 보내지 않은 실패·취소 호출의 토큰은 NULL이며 추정하지 않습니다. 합계는 확인된 사용량만 더합니다.
 - Exa `results[].image`는 `image_url`, `favicon`은 `favicon_url`에 대응합니다. `image_storage_path`는 향후 이미지 파일 저장용으로 준비했습니다. 현재 Exa 수집·이미지 다운로드는 구현하지 않았습니다.
 - 예시 수집은 `data_mode=demo`로 구분하며 LLM 토큰 사용량을 생성하지 않습니다.
 - 기존 브라우저 보관함 데이터는 자동 이관하지 않습니다. 구독 관리는 프론트엔드 설정 기능이며 자동 실행·발송 백엔드는 아직 없습니다.
 - 기존 `roles.code`는 시작 시 제거하며 직급 ID와 사용자 연결, 비밀번호, 관리자 권한을 유지합니다.
+
+
+## 구독 데이터베이스
+
+다음 구독 테이블은 서버 시작 시 생성됩니다. 현재는 스키마만 추가했으며 구독 화면의 브라우저 저장을 DB로 이관하거나 구독 API·매일 수집·자동 발행을 구현하지 않았습니다.
+
+- `subscripted_articles`: 기준 뉴스레터별 누적 기사. `(sample_id, url)`로 중복을 방지하며 원문 발행일·수집 시각과 이미지 정보를 저장합니다. 발행일을 알 수 없으면 NULL로 유지합니다.
+- `subscriptions`: 샘플별 사용자 구독 관계. `subscription_id`, `sample_id`, `user_id`, `status`, `created_at`, `updated_at`을 저장합니다. `(sample_id, user_id)`는 유일하며 상태는 active/paused/cancelled입니다. 기존 newsletter_subscriptions의 구독 관계와 상태·시각을 이관하고 발행 설정 컬럼은 제거합니다.
+- `subscripted_issues`: 사용자별 구독에서 자동 선정된 기사와 요약·점수·LLM 요청 참조.
+- `subscripted_newsletters`: 샘플·수집 기간별 공유 발행본. `newsletter_id`, `sample_id`, `coverage_start_date`, `coverage_end_date`, `issue_ids`, `summary`, `request_id`, `html_content`, `created_at`, `published_at`을 저장합니다. issue_ids 배열 순서가 표시 순서이며, 샘플·커버 기간 조합은 고유합니다. summary는 이번 호 핵심 요약, request_id는 그 요약 생성 호출입니다. 아직 발행 전이면 published_at은 NULL입니다. JSON 내 이슈의 존재·중복·원문 기사의 해당 샘플 소속은 향후 발행 API에서 검증해야 합니다. 이슈의 subscription_id는 생성 출처를 나타내며, 발행본을 받는 구독은 subscription_history로 관리합니다. 요약 LLM 호출 단계는 `subscription_newsletter_summary`로 구분할 예정입니다.
+
+기준 샘플의 주제는 `sample_newsletters.topic`, 도메인은 `sample_domains`를 사용합니다. 참조 중인 기준 뉴스레터는 삭제를 제한하여 누적 기사와 공동 발행 이력을 보호합니다. 현재 계정 삭제의 연쇄 삭제도 이 제한을 받으므로 구독 API 도입 시 계정 삭제·공동 데이터 보존 정책을 함께 연결해야 합니다.
+
+
+### 샘플과 실제 발행 결과 분리
+
+- `sample_newsletters`: 뉴스레터 만들기에서 생성한 샘플. 기존 `newsletters` 데이터의 ID, HTML, 소유자, 저장 시점은 유지하여 이관합니다.
+- `subscripted_newsletters`: 실제 구독 발행 결과. 기존 `newsletters`와 `newsletter_publications`를 통합합니다. 샘플 생성은 이 테이블에 기록하지 않습니다.
+- 발행본은 sample_id로 샘플을 참조합니다. `subscription_history`는 `subscription_id`, `newsletter_id`, `created_at`으로 구성하며 두 ID의 조합이 기본키입니다. 여러 구독이 동일 발행본에 연결될 수 있고, 이력이 있는 구독·발행본 삭제는 제한합니다. 이력의 구독과 발행본은 같은 sample_id인지 향후 API에서 검증해야 합니다.
+- 기존 `/api/newsletters` 목록·저장·다운로드 경로는 호환성을 위해 유지하며 샘플 보관함만 반환합니다.
+- 실제 발행 생성·조회 API는 아직 추가하지 않았습니다. 샘플 제작은 sample_id를 기준으로 하며, 기사와 이슈는 `sample_articles`, `sample_issues`에 저장합니다.
+
+`domains`는 `domain_id`, `host`, `created_at`으로 구성합니다. 출처 표시는 `domains.host`를 사용합니다.
+
+
+### 샘플별 도메인 저장
+
+`sample_domains`의 컬럼은 `sample_id`, `domain_id`, `request_id`, `kind`, `description`, `recommendation_reason`, `topic_relevance`, `created_at`입니다. 기본키는 `(sample_id, domain_id)`이며 `kind`는 `recommended` 또는 `manual`입니다. `request_id`는 `llm_requests.request_id`를 참조합니다. 직접 추가와 호출을 특정할 수 없는 과거 추천은 NULL입니다.
+
+작업 시작 시 `sample_newsletters.status='draft'`인 초안을 만들고 선택한 도메인만 연결합니다. 완성된 샘플은 같은 sample_id에서 `status='completed'`로 변경하며 당시 선택 도메인을 보존합니다. 보관함은 저장한 완성 샘플만 표시합니다. 선택하지 않은 추천 후보는 서버 DB에 저장하지 않습니다. 새 추천은 상세 생성의 최종 성공 호출 ID를 연결합니다.
+
+기존 `run_domains`는 이관 후 제거합니다. 완료 샘플은 당시 스냅샷의 출처를, 초안은 해당 실행의 최종 선택 출처를 사용합니다. 동일 호스트는 대소문자·www·URL 경로를 정규화해 하나로 합치며 수동 중복 추가가 AI 추천 정보를 덮어쓰지 않습니다.
+
+
+### LLM 요청 기록
+
+`llm_requests`는 `request_id`, `user_id`, `step`, `provider`, `model`, `input_tokens`, `output_tokens`, `total_tokens`, `cached_input_tokens`, `started_at`, `completed_at`, `duration_ms`만 저장합니다. 모델은 호출한 Azure 배포 이름입니다. 도메인 후보 선정·상세 설명 단계는 `sample_domain_recommendation`으로 기록합니다.
+
+기존 `ai_requests`의 요청 ID·모델·토큰·시간은 유지하고 사용자 ID는 기존 작업 소유자로 이관합니다. 재시도도 각각 독립 요청으로 저장합니다. 공급자 응답 ID·재시도 그룹·시도 번호·오류 상세는 제거합니다. 호출 조회는 사용자 단위이며 실행별 연결 및 호출 상태 이력은 저장하지 않습니다. 토큰을 받지 못한 호출은 NULL을 저장하며 사용량을 추정하지 않습니다.
+
+
+### 샘플 기사와 이슈
+
+- `sample_articles`: `article_id`, `sample_id`, `domain_id`, `url`, `title`, `published_at`, `content`, `summary`, `image_url`, `favicon_url`, `image_storage_path`, `collected_at`. 같은 샘플의 동일 URL은 한 기사로 저장합니다.
+- `sample_issues`: `issue_id`, `sample_id`, `article_id`, `request_id`, `technical_score`, `organization_score`, `impact_score`, `recency_score`, `total_score`, `rank`, `is_selected`, `duplicate_of_issue_id`, `created_at`. 기사당 최종 분석 한 건을 저장합니다. 점수는 0~100 또는 NULL이며 중복 이슈의 순위는 NULL일 수 있습니다.
+- 기사와 대표 이슈는 같은 샘플 소속이어야 합니다. 중복 이슈는 `duplicate_of_issue_id`로 대표를 참조하고 최종 선택할 수 없습니다. 화면에는 대표 이슈만 표시하며 상위 5개를 기본 선택합니다.
+- 분석 호출은 `llm_requests.request_id`로 연결할 수 있습니다. 실제 LLM 중복 분석·점수화는 아직 구현하지 않았으며 현재 예시 결과의 request_id는 NULL입니다. 가상 데이터 여부는 기존 작업의 data_mode로 구분합니다.
+- 초안 완성은 같은 sample_id를 유지합니다. 완성 후 재수집·설정·선택 변경 시 새 초안으로 분리하고 도메인·기사·이슈를 복사해 기존 샘플을 보존합니다.
+- 이전 run_articles/run_issues는 이관 후 제거합니다. 기존 가상 기사에 반복된 홈페이지 URL은 하나로 병합합니다. 이관 전 원본 DB는 별도로 백업합니다. 과거 완성 샘플은 당시 스냅샷에 있는 기사를 기준으로 복원하며 저장된 HTML과 원래 스냅샷은 변경하지 않습니다.
+
+
+### 사용 이력 테이블 제거
+
+`usage_events`는 초기화 시 삭제하며 별도 이벤트 로그를 저장하지 않습니다. 선택된 도메인·기사·이슈와 완성 샘플, LLM 요청 기록은 각각의 테이블에 유지합니다.
+
+추천 후보는 사용자·작업·설명·호출 ID를 포함한 서버 서명 토큰으로 전달합니다. 선택 시 서명과 사용자·작업을 검증한 후 `sample_domains`에 저장합니다. 유효기간은 2시간이며 서버 재시작 후에는 추천을 다시 받아야 합니다. 현재 서명 키는 단일 서버 프로세스 메모리에 있습니다.
+
+실행별 전체 LLM 집계 API는 제거했습니다. `/api/llm-requests`에서 사용자 본인의 전체 호출과 확인된 토큰 합계를 조회합니다. `llm_requests` 컬럼은 추가하지 않았습니다.
+
+
+### 구독 원본 기사
+
+`subscripted_articles`는 `article_id`, `sample_id`, `domain_id`, `request_id`, `url`, `title`, `published_at`, `content`, `image_url`, `favicon_url`, `image_storage_path`, `collected_at`으로 구성합니다. 요약·점수·선정 여부는 저장하지 않습니다. URL은 수집 코드에서 정규화한 뒤 저장해야 하며 `(sample_id,url)` 고유 제약으로 중복 삽입을 막습니다.
+
+최근 7일 비교는 `collected_at`, 발행 커버 기간 후보 조회는 `published_at`을 기준으로 합니다. 두 날짜에 각각 sample_id와의 복합 인덱스를 제공합니다. 중복 판정 호출은 `llm_requests.request_id`를 참조하며 향후 step은 `subscription_article_deduplication`을 사용합니다. 과거 기사에는 대응하는 호출이 없어 request_id를 NULL로 이관합니다. 기존 canonical_url을 url로 사용하고 도메인은 해당 URL 호스트에서 연결합니다.
+
+현재 변경은 DB 스키마와 이관까지이며 매일 수집·최근 7일 LLM 중복 판정은 아직 구현하지 않았습니다.
+
+
+### 샘플 메타데이터 간소화
+
+`sample_newsletters`는 `sample_id`, `user_id`, `topic`, `collection_start_date`, `collection_end_date`, `status`, `html_content`, `created_at`, `completed_at`, `saved_at`, `last_issued_newsletter_id`를 저장합니다. `last_issued_newsletter_id`는 이 샘플 기준 최신 실제 발행본의 `subscripted_newsletters.newsletter_id`를 참조하며, 발행 이력이 없으면 NULL입니다. 발행 기능 구현 시 발행 성공 트랜잭션에서 갱신합니다. 초안 HTML·완성 시각은 NULL이며 샘플 제작을 완료하면 같은 ID로 갱신합니다. 보관함 저장 여부는 saved_at으로 구분합니다.
+
+기존 run_id·title·issue_count·snapshot_json·template_version·content_hash는 제거합니다. 선택 기사 수는 sample_issues에서 계산하고 출처는 sample_domains를 조회합니다. 제작 API와 도메인 추천·LLM 사용자 연결은 sample_id를 사용합니다. 완료된 샘플에 대한 생성 재요청은 같은 결과를 반환합니다.
+
+완성 후 편집하면 새로운 sample_id의 초안을 생성하여 기존 구독 기준과 완성 HTML을 보존합니다. 기사 선택 변경 응답에는 새 기사·이슈 ID를 반환하며 프론트엔드도 이를 갱신합니다. 기존 DB 이관은 ID·HTML·작성자·저장 시각·관련 기사 및 구독 연결을 유지하고 이전 스냅샷에서 주제·수집 기간을 추출합니다.
+
+### 구독 자동 선정 이슈
+
+`subscripted_issues`는 자동 선정된 이슈만 저장합니다. 컬럼은 `issue_id`, `subscription_id`, `article_id`, `request_id`, `summary`, `technical_score`, `organization_score`, `impact_score`, `recency_score`, `total_score`, `created_at`입니다. 점수는 REAL 타입으로 0~100을 허용하며 NULL도 가능합니다. 사용자별 구독에 연결하고 원문 기사는 공유합니다. 동일 기사를 다른 발행에서 재선정할 수 있도록 기사 유일성 제약을 두지 않습니다. 연결된 구독·원문 삭제는 제한하고, LLM 요청 삭제 시 request_id만 NULL로 변경합니다. 발행본 연결 및 순서는 추후 뉴스레터의 issue_id 목록으로 관리합니다. 자동 선정 실행과 발행 기능은 아직 구현하지 않았습니다.
+
+### 사용자별 오류 기록
+
+`errors`의 컬럼은 `error_id`, `user_id`, `step`, `error_type`, `message`, `request_id`, `created_at`입니다. `/api/errors`는 로그인한 일반 사용자 본인의 오류만 반환합니다. 단계는 sample_domain_recommendation, sample_domain_selection, sample_period_setting, sample_article_collection, sample_issue_selection, sample_newsletter_generation, sample_newsletter_save, sample_newsletter_download 등으로 구분합니다. LLM 실패 시 해당 request_id를 연결하고 그 밖의 오류는 NULL입니다. 재시도 전 실패도 기록하고 정상 취소는 오류로 기록하지 않습니다. 공급자 응답 원문·프롬프트·인증 정보 대신 정제된 오류 메시지를 저장합니다. 기존 newsletter_runs의 error_message는 errors로 이관하고, 샘플이 없는 미완료 작업은 초안을 보존한 후 테이블을 제거합니다. 오류 조회 UI와 자동 구독 실행은 아직 구현하지 않았습니다.

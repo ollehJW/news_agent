@@ -1,5 +1,4 @@
 """Persist the existing newsletter workflow; collection remains explicitly demo data."""
-import hashlib
 import json
 import math
 import uuid
@@ -11,124 +10,116 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel, Field, field_validator
 
-from .auth import database, member_user, now
+from .auth import database, now
+from .error_storage import tracked_member_user as member_user, ErrorRoute
 from .domains import Topic, normalize_host
-from .tracking import event
+from .sample_lifecycle import editable_sample
+from .llm_tracking import requests_for_user, owned_recommendation_request
+from .recommendation_tokens import sign_recommendation, verify_recommendation
 from .demo_data import TOPICS
 
-router = APIRouter(prefix='/api', dependencies=[Depends(member_user)])
+router = APIRouter(prefix='/api', route_class=ErrorRoute, dependencies=[Depends(member_user)])
 templates = Environment(loader=FileSystemLoader(Path(__file__).with_name('template')),
                         autoescape=select_autoescape(['html']))
 TEMPLATE_VERSION = 'wianews-v1'
 
 
-def owned_run(db, run_id, user_id):
-    row = db.execute('SELECT * FROM newsletter_runs WHERE run_id=? AND user_id=?', (run_id, user_id)).fetchone()
+def owned_sample(db, sample_id, user_id):
+    row = db.execute('SELECT * FROM sample_newsletters WHERE sample_id=? AND user_id=?', (sample_id, user_id)).fetchone()
     if not row:
         raise HTTPException(404, '생성 작업을 찾을 수 없습니다.')
     return row
 
 
-def new_run(topic, user_id):
-    run_id, stamp = str(uuid.uuid4()), now()
+def new_sample(topic, user_id):
+    sample_id = str(uuid.uuid4())
     with database() as db:
-        db.execute('INSERT INTO newsletter_runs (run_id,user_id,topic,created_at,updated_at) VALUES (?,?,?,?,?)',
-                   (run_id, user_id, topic, stamp, stamp))
-        event(db, user_id, run_id, 'run_started')
-    return run_id
+        db.execute('INSERT INTO sample_newsletters (sample_id,user_id,topic,created_at) VALUES (?,?,?,?)',
+                   (sample_id,user_id,topic,now()))
+    return sample_id
 
 
-def prepare_recommendation(topic, user_id, run_id=None):
-    run_id = run_id or new_run(topic, user_id)
+def prepare_recommendation(topic, user_id, sample_id=None):
+    sample_id = sample_id or new_sample(topic, user_id)
     with database() as db:
-        run = owned_run(db, run_id, user_id)
-        if run['topic'] != topic:
+        sample = owned_sample(db, sample_id, user_id)
+        if sample['topic'] != topic:
             raise HTTPException(409, '작업 주제가 변경되었습니다. 새 작업을 시작해 주세요.')
         batch = str(uuid.uuid4())
-        event(db, user_id, run_id, 'domain_recommendation_started', {'batch_id': batch})
-    return run_id, batch
+    return sample_id, batch
 
 
-def shared_domain(db, host, name, *, update_name=False):
+def shared_domain(db, host):
     stamp = now()
-    db.execute('''INSERT INTO domains (domain_id,host,name,created_at,updated_at)
-        VALUES (?,?,?,?,?) ON CONFLICT(host) DO UPDATE SET
-        name=CASE WHEN ? THEN excluded.name ELSE domains.name END,
-        updated_at=excluded.updated_at''',
-        (str(uuid.uuid4()), host, name, stamp, stamp, update_name))
+    db.execute('''INSERT INTO domains (domain_id,host,created_at)
+        VALUES (?,?,?) ON CONFLICT(host) DO NOTHING''',
+        (str(uuid.uuid4()), host, stamp))
     return db.execute('SELECT domain_id FROM domains WHERE host=?', (host,)).fetchone()[0]
 
 
-def store_recommendation(run_id, batch, domain, rank):
-    snapshot_id, stamp = str(uuid.uuid4()), now()
+def store_recommendation(sample_id, batch, domain, rank):
     with database() as db:
-        did = shared_domain(db, domain.host, domain.name, update_name=True)
-        db.execute('''INSERT INTO run_domains
-            (run_domain_id,run_id,domain_id,recommendation_batch_id,name,kind,description,recommendation_reason,
-             topic_relevance,recommendation_rank,added_by,created_at,updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,'ai',?,?)''',
-            (snapshot_id, run_id, did, batch, domain.name, domain.kind, domain.desc, domain.reason,
-             domain.relevance, rank, stamp, stamp))
-    return snapshot_id
+        uid = db.execute('SELECT user_id FROM sample_newsletters WHERE sample_id=?',(sample_id,)).fetchone()[0]
+    return sign_recommendation(uid,sample_id,{
+        'host':domain.host,'request_id':domain._request_id,
+        'desc':domain.desc,'reason':domain.reason,'relevance':domain.relevance})
 
 
-def recommendation_finished(run_id, batch, state, count):
-    with database() as db:
-        row = db.execute('SELECT user_id FROM newsletter_runs WHERE run_id=?', (run_id,)).fetchone()
-        if row:
-            event(db, row[0], run_id, 'domain_recommendation_'+state, {'batch_id': batch, 'count': count})
+
+def sources(db, sample_id, selected_only=True):
+    sid = sample_id
+    rows = db.execute('SELECT sd.*,d.host FROM sample_domains sd JOIN domains d USING(domain_id) WHERE sd.sample_id=? ORDER BY sd.created_at,sd.domain_id',(sid,)).fetchall()
+    selected = [{'sample_id':sid,'domain_id':r['domain_id'],'request_id':r['request_id'],
+        'host':r['host'],'name':r['host'],'kind':r['kind'],'desc':r['description'] or '',
+        'reason':r['recommendation_reason'],'relevance':r['topic_relevance'],
+        'custom':r['kind']=='manual','mark':r['host'][:2],'selected':True} for r in rows]
+    if selected_only:
+        return selected
+    return [r for r in selected if not r['custom']]
 
 
-def sources(db, run_id, selected_only=True):
-    rows = db.execute('''SELECT rd.*, d.host FROM run_domains rd JOIN domains d USING(domain_id)
-        WHERE rd.run_id=?'''+(' AND rd.is_selected=1' if selected_only else '')+' ORDER BY rd.created_at,rd.run_domain_id', (run_id,))
-    return [{'run_domain_id': r['run_domain_id'], 'domain_id': r['domain_id'], 'host': r['host'],
-             'name': r['name'], 'kind': r['kind'] or '직접 추가', 'desc': r['description'] or '',
-             'reason': r['recommendation_reason'], 'relevance': r['topic_relevance'],
-             'custom': r['added_by']=='manual', 'mark': r['name'][:2],
-             'selected': bool(r['is_selected']), 'recommendation_rank': r['recommendation_rank']} for r in rows]
-
-
-def issue_rows(db, run_id):
-    rows = db.execute('''SELECT i.*,a.url,a.source,a.published_at,a.image_url,a.image_alt,d.host,
-        (SELECT count(*)-1 FROM run_articles x WHERE x.issue_id=i.issue_id) AS duplicates
-        FROM run_issues i JOIN run_articles a ON a.article_id=i.representative_article_id
-        LEFT JOIN domains d ON d.domain_id=a.domain_id WHERE i.run_id=? ORDER BY i.rank''', (run_id,))
-    topic = db.execute('SELECT topic FROM newsletter_runs WHERE run_id=?', (run_id,)).fetchone()[0]
-    return [{'id': r['issue_id'], 'issue': r['issue_id'], 'title': r['title'], 'summary': r['summary'],
-             'url': r['url'], 'source': r['source'], 'host': r['host'], 'date': r['published_at'],
-             'imageUrl': r['image_url'], 'imageAlt': r['image_alt'], 'tag': topic,
+def issue_rows(db, sample_id):
+    sid=sample_id
+    rows = db.execute('''SELECT i.*,a.title,a.summary,a.url,a.published_at,a.image_url,d.host,
+        (SELECT count(*) FROM sample_issues x WHERE x.sample_id=i.sample_id AND x.duplicate_of_issue_id=i.issue_id) AS duplicates
+        FROM sample_issues i JOIN sample_articles a ON a.article_id=i.article_id AND a.sample_id=i.sample_id
+        LEFT JOIN domains d ON d.domain_id=a.domain_id
+        WHERE i.sample_id=? AND i.duplicate_of_issue_id IS NULL ORDER BY i.rank,i.issue_id''', (sid,))
+    topic = db.execute('SELECT topic FROM sample_newsletters WHERE sample_id=?', (sample_id,)).fetchone()[0]
+    return [{'id': r['issue_id'], 'issue': r['issue_id'], 'article_id':r['article_id'], 'title': r['title'], 'summary': r['summary'],
+             'url': r['url'], 'source': r['host'], 'host': r['host'], 'date': r['published_at'],
+             'imageUrl': r['image_url'], 'imageAlt': r['title'], 'tag': topic,
              'scores': [r['technical_score'],r['organization_score'],r['impact_score'],r['recency_score']],
              'score': r['total_score'], 'duplicates': r['duplicates'], 'selected': bool(r['is_selected']),
-             'default_selected': bool(r['is_default_selected'])} for r in rows]
+             'default_selected': bool(r['rank'] and r['rank']<=5 and (r['total_score'] or 0)>=70)} for r in rows]
 
 
-class RunBody(BaseModel):
+class SampleBody(BaseModel):
     topic: Topic
 
 
-@router.post('/runs', status_code=201)
-def create_run(body: RunBody, user=Depends(member_user)):
-    return {'run_id': new_run(body.topic, user['user_id'])}
+@router.post('/samples', status_code=201)
+def create_sample(body: SampleBody, user=Depends(member_user)):
+    return {'sample_id': new_sample(body.topic, user['user_id'])}
 
 
-@router.get('/runs')
-def list_runs(user=Depends(member_user)):
+@router.get('/samples')
+def list_samples(user=Depends(member_user)):
     with database() as db:
-        return [dict(r) for r in db.execute('SELECT * FROM newsletter_runs WHERE user_id=? ORDER BY created_at DESC LIMIT 100', (user['user_id'],))]
+        return [dict(r) for r in db.execute('SELECT * FROM sample_newsletters WHERE user_id=? ORDER BY created_at DESC LIMIT 100', (user['user_id'],))]
 
 
-@router.get('/runs/{run_id}')
-def get_run(run_id: str, user=Depends(member_user)):
+@router.get('/samples/{sample_id}')
+def get_sample(sample_id: str, user=Depends(member_user)):
     with database() as db:
-        run = dict(owned_run(db, run_id, user['user_id']))
-        return {**run, 'domains': sources(db, run_id), 'recommendations': sources(db, run_id, False),
-                'issues': issue_rows(db, run_id)}
+        sample = dict(owned_sample(db, sample_id, user['user_id']))
+        return {**sample, 'domains': sources(db, sample_id), 'recommendations': sources(db, sample_id, False),
+                'issues': issue_rows(db, sample_id)}
 
 
 class SourceInput(BaseModel):
     host: str
-    run_domain_id: str | None = None
+    recommendation_id: str | None = Field(default=None,max_length=16000)
     custom: bool = False
 
     @field_validator('host')
@@ -141,43 +132,44 @@ class SourcesBody(BaseModel):
     domains: list[SourceInput] = Field(max_length=20)
 
 
-@router.put('/runs/{run_id}/sources')
-def set_sources(run_id: str, body: SourcesBody, user=Depends(member_user)):
-    if len({d.host for d in body.domains}) != len(body.domains):
-        raise HTTPException(400, '중복 도메인은 추가할 수 없습니다.')
+@router.put('/samples/{sample_id}/sources')
+def set_sources(sample_id: str, body: SourcesBody, user=Depends(member_user)):
+    # Normalize first, then merge repeated hosts. Keep AI provenance when both are provided.
+    unique={}
+    for item in body.domains:
+        current=unique.get(item.host)
+        if current is None or (item.recommendation_id and not current.recommendation_id):
+            unique[item.host]=item
     with database() as db:
         db.execute('BEGIN IMMEDIATE')
-        owned_run(db, run_id, user['user_id'])
-        before = {d['host'] for d in sources(db, run_id)}
-        chosen = []
-        for item in body.domains:
-            row = None
-            if item.run_domain_id:
-                row = db.execute('''SELECT rd.run_domain_id FROM run_domains rd JOIN domains d USING(domain_id)
-                    WHERE rd.run_id=? AND rd.run_domain_id=? AND d.host=?''', (run_id,item.run_domain_id,item.host)).fetchone()
-                if not row:
-                    raise HTTPException(400, '추천 도메인이 해당 작업에 속하지 않습니다.')
-            if not row and not item.custom:
-                row = db.execute('''SELECT rd.run_domain_id FROM run_domains rd JOIN domains d USING(domain_id)
-                    WHERE rd.run_id=? AND d.host=? ORDER BY rd.created_at DESC LIMIT 1''', (run_id,item.host)).fetchone()
-            if row:
-                chosen.append(row[0])
-            else:
-                did = shared_domain(db, item.host, item.host)
-                existing = db.execute("SELECT run_domain_id FROM run_domains WHERE run_id=? AND domain_id=? AND added_by='manual' LIMIT 1", (run_id,did)).fetchone()
-                rid = existing[0] if existing else str(uuid.uuid4())
-                if not existing:
-                    db.execute('''INSERT INTO run_domains (run_domain_id,run_id,domain_id,name,kind,added_by,created_at,updated_at)
-                        VALUES (?,?,?,?,'직접 추가','manual',?,?)''', (rid,run_id,did,item.host,now(),now()))
-                    event(db,user['user_id'],run_id,'domain_manually_added',{'host':item.host})
-                chosen.append(rid)
-        db.execute('UPDATE run_domains SET is_selected=0,updated_at=? WHERE run_id=?', (now(),run_id))
-        for rid in chosen:
-            db.execute('UPDATE run_domains SET is_selected=1 WHERE run_domain_id=?', (rid,))
-        after = {d.host for d in body.domains}
-        event(db,user['user_id'],run_id,'domains_selected',{'added':sorted(after-before),'removed':sorted(before-after),'count':len(after)})
-        db.execute('UPDATE newsletter_runs SET updated_at=? WHERE run_id=?',(now(),run_id))
-        return sources(db,run_id)
+        owned_sample(db, sample_id, user['user_id'])
+        sid,_=editable_sample(db,sample_id)
+        chosen=[]
+        for item in unique.values():
+            did=shared_domain(db,item.host)
+            existing=db.execute('SELECT * FROM sample_domains WHERE sample_id=? AND domain_id=?',(sid,did)).fetchone()
+            data=None
+            if item.recommendation_id:
+                data=verify_recommendation(item.recommendation_id,user['user_id'],sample_id)
+                if data['host']!=item.host:
+                    raise HTTPException(400,'추천 도메인이 일치하지 않습니다.')
+            if data:
+                request_id=data.get('request_id')
+                if request_id and not owned_recommendation_request(db,request_id,user['user_id']):
+                    raise HTTPException(400,'추천 호출 기록이 해당 작업에 속하지 않습니다.')
+                # Re-adding manually must not discard the existing AI recommendation.
+                db.execute('''INSERT INTO sample_domains VALUES (?,?,?,'recommended',?,?,?,?)
+                    ON CONFLICT(sample_id,domain_id) DO UPDATE SET request_id=excluded.request_id,
+                    kind=excluded.kind,description=excluded.description,recommendation_reason=excluded.recommendation_reason,
+                    topic_relevance=excluded.topic_relevance''',
+                    (sid,did,request_id,data.get('desc'),data.get('reason'),data.get('relevance'),now()))
+            elif not existing:
+                db.execute("INSERT INTO sample_domains (sample_id,domain_id,kind,created_at) VALUES (?,?,'manual',?)",(sid,did,now()))
+            chosen.append(did)
+        for row in db.execute('SELECT domain_id FROM sample_domains WHERE sample_id=?',(sid,)).fetchall():
+            if row[0] not in chosen:
+                db.execute('DELETE FROM sample_domains WHERE sample_id=? AND domain_id=?',(sid,row[0]))
+        return {'sample_id':sid,'domains':sources(db,sid)}
 
 
 class PeriodBody(BaseModel):
@@ -185,103 +177,104 @@ class PeriodBody(BaseModel):
     end: date
 
 
-@router.put('/runs/{run_id}/period')
-def set_period(run_id: str, body: PeriodBody, user=Depends(member_user)):
+@router.put('/samples/{sample_id}/period')
+def set_period(sample_id: str, body: PeriodBody, user=Depends(member_user)):
     if body.start > body.end:
         raise HTTPException(400, '수집 시작일과 종료일을 확인해 주세요.')
     with database() as db:
-        owned_run(db,run_id,user['user_id'])
-        db.execute('UPDATE newsletter_runs SET start_date=?,end_date=?,current_step=1,updated_at=? WHERE run_id=?',
-                   (body.start.isoformat(),body.end.isoformat(),now(),run_id))
-        event(db,user['user_id'],run_id,'period_configured',{'start':body.start.isoformat(),'end':body.end.isoformat()})
-    return {'ok':True}
+        db.execute('BEGIN IMMEDIATE')
+        owned_sample(db,sample_id,user['user_id'])
+        sid,_=editable_sample(db,sample_id)
+        db.execute('UPDATE sample_newsletters SET collection_start_date=?,collection_end_date=? WHERE sample_id=?',(body.start.isoformat(),body.end.isoformat(),sid))
+    return {'sample_id':sid}
 
 
-@router.post('/runs/{run_id}/collect-demo')
-def collect_demo(run_id: str, user=Depends(member_user)):
+@router.post('/samples/{sample_id}/collect-demo')
+def collect_demo(sample_id: str, user=Depends(member_user)):
     with database() as db:
         db.execute('BEGIN IMMEDIATE')
-        run = owned_run(db,run_id,user['user_id'])
-        selected = sources(db,run_id)
-        if not selected or not run['start_date'] or not run['end_date']:
+        sample = owned_sample(db,sample_id,user['user_id'])
+        selected = sources(db,sample_id)
+        if not selected or not sample['collection_start_date'] or not sample['collection_end_date']:
             raise HTTPException(400, '수집 도메인과 기간을 먼저 설정해 주세요.')
-        event(db,user['user_id'],run_id,'collection_started',{'mode':'demo'})
-        db.execute('DELETE FROM run_issues WHERE run_id=?',(run_id,))
-        db.execute('DELETE FROM run_articles WHERE run_id=?',(run_id,))
+        sid,_=editable_sample(db,sample_id)
+        db.execute('DELETE FROM sample_issues WHERE sample_id=?',(sid,))
+        db.execute('DELETE FROM sample_articles WHERE sample_id=?',(sid,))
         for i, item in enumerate(TOPICS):
             domain = selected[i % len(selected)]
-            title, summary = f"{run['topic']} · {item[0]}", item[1]
+            title, summary = f"{sample['topic']} · {item[0]}", item[1]
             scores = [96-i*4,94-i*3,92-i*4,95-i*2]
             score = math.floor(sum(a*b for a,b in zip(scores,[.35,.30,.25,.10]))+.5)
             issue_id, article_id = str(uuid.uuid4()), str(uuid.uuid4())
             stamp=now()
-            db.execute('''INSERT INTO run_articles (article_id,run_id,domain_id,url,title,source,published_at,content_text,summary,collected_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?)''', (article_id,run_id,domain['domain_id'],f"https://{domain['host']}/",title,domain['name'],run['end_date'],summary,summary,stamp))
-            db.execute('''INSERT INTO run_issues (issue_id,run_id,title,summary,representative_article_id,technical_score,organization_score,
-                impact_score,recency_score,total_score,rank,is_default_selected,is_selected,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', (issue_id,run_id,title,summary,article_id,*scores,score,i+1,int(i<5),int(i<5),stamp,stamp))
-            db.execute('UPDATE run_articles SET issue_id=? WHERE article_id=?',(issue_id,article_id))
+            # Fragments distinguish mock records while keeping links on the source homepage.
+            url=f"https://{domain['host']}/#wianews-demo-{i+1}"
+            db.execute('''INSERT INTO sample_articles (article_id,sample_id,domain_id,url,title,published_at,content,summary,collected_at)
+                VALUES (?,?,?,?,?,?,?,?,?)''', (article_id,sid,domain['domain_id'],url,title,sample['collection_end_date'],summary,summary,stamp))
+            db.execute('''INSERT INTO sample_issues (issue_id,sample_id,article_id,technical_score,organization_score,
+                impact_score,recency_score,total_score,rank,is_selected,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (issue_id,sid,article_id,*scores,score,i+1,int(i<5),stamp))
             if i<3:
-                db.execute('''INSERT INTO run_articles (article_id,run_id,domain_id,issue_id,url,title,source,published_at,content_text,summary,collected_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (str(uuid.uuid4()),run_id,domain['domain_id'],issue_id,f"https://{domain['host']}/",title,domain['name'],run['end_date'],summary,summary,stamp))
-        db.execute("UPDATE newsletter_runs SET current_step=2,status='ready',error_message=NULL,updated_at=? WHERE run_id=?",(now(),run_id))
-        event(db,user['user_id'],run_id,'collection_completed',{'mode':'demo','article_count':9,'issue_count':6})
-        event(db,user['user_id'],run_id,'default_issues_selected',{'count':5})
-        return {'issues':issue_rows(db,run_id),'article_count':9,'data_mode':'demo'}
+                duplicate_article,duplicate_issue=str(uuid.uuid4()),str(uuid.uuid4())
+                db.execute('''INSERT INTO sample_articles (article_id,sample_id,domain_id,url,title,published_at,content,summary,collected_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)''', (duplicate_article,sid,domain['domain_id'],url+'-related',title,sample['collection_end_date'],summary,summary,stamp))
+                db.execute('''INSERT INTO sample_issues (issue_id,sample_id,article_id,technical_score,organization_score,
+                    impact_score,recency_score,total_score,is_selected,duplicate_of_issue_id,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,0,?,?)''', (duplicate_issue,sid,duplicate_article,*scores,score,issue_id,stamp))
+        return {'sample_id':sid,'issues':issue_rows(db,sid),'article_count':9,'data_mode':'demo'}
 
 
 class SelectionBody(BaseModel):
     issue_ids: list[str] = Field(max_length=100)
 
 
-@router.put('/runs/{run_id}/selection')
-def set_selection(run_id: str, body: SelectionBody, user=Depends(member_user)):
+@router.put('/samples/{sample_id}/selection')
+def set_selection(sample_id: str, body: SelectionBody, user=Depends(member_user)):
     with database() as db:
         db.execute('BEGIN IMMEDIATE')
-        owned_run(db,run_id,user['user_id'])
-        existing = {r['issue_id']:bool(r['is_selected']) for r in db.execute('SELECT issue_id,is_selected FROM run_issues WHERE run_id=?',(run_id,))}
+        owned_sample(db,sample_id,user['user_id'])
+        sid=sample_id
+        existing = {r['issue_id']:bool(r['is_selected']) for r in db.execute('SELECT issue_id,is_selected FROM sample_issues WHERE sample_id=? AND duplicate_of_issue_id IS NULL',(sid,))}
         chosen=set(body.issue_ids)
         if not chosen.issubset(existing):
             raise HTTPException(400,'선택한 이슈가 해당 작업에 속하지 않습니다.')
+        sid,mapping=editable_sample(db,sample_id)
         for iid,was_selected in existing.items():
             selected=iid in chosen
             if was_selected!=selected:
-                db.execute('UPDATE run_issues SET is_selected=?,updated_at=? WHERE issue_id=?',(int(selected),now(),iid))
-                event(db,user['user_id'],run_id,'issue_selected' if selected else 'issue_deselected',{'issue_id':iid})
-        return {'selected_ids':list(chosen)}
+                db.execute('UPDATE sample_issues SET is_selected=? WHERE issue_id=?',(int(selected),mapping.get(iid,iid)))
+        return {'sample_id':sid,'selected_ids':[mapping.get(iid,iid) for iid in chosen],'issues':issue_rows(db,sid)}
 
 
-def newsletter_dict(row):
-    snapshot=json.loads(row['snapshot_json'])
-    return {'id':row['newsletter_id'],'run_id':row['run_id'],'title':row['title'],'html':row['html_content'],
-            'date':(row['saved_at'] or row['created_at'])[:10], 'count':row['issue_count'],
-            'topic':snapshot['topic'],'domains':snapshot['domains'],'dates':snapshot['dates'],'saved_at':row['saved_at']}
+def newsletter_dict(db,row):
+    count=db.execute('SELECT count(*) FROM sample_issues WHERE sample_id=? AND is_selected=1',(row['sample_id'],)).fetchone()[0]
+    return {'id':row['sample_id'],'title':row['topic'],'html':row['html_content'],
+            'date':(row['saved_at'] or row['completed_at'] or row['created_at'])[:10], 'count':count,
+            'topic':row['topic'],'domains':sources(db,row['sample_id']),
+            'dates':{'start':row['collection_start_date'],'end':row['collection_end_date']},'saved_at':row['saved_at']}
 
 
-@router.post('/runs/{run_id}/newsletter')
-def make_newsletter(run_id: str, user=Depends(member_user)):
+@router.post('/samples/{sample_id}/newsletter')
+def make_newsletter(sample_id: str, user=Depends(member_user)):
     with database() as db:
         db.execute('BEGIN IMMEDIATE')
-        run=owned_run(db,run_id,user['user_id'])
-        issues=[i for i in issue_rows(db,run_id) if i['selected']]
+        owned_sample(db,sample_id,user['user_id'])
+        sid=sample_id
+        sample=db.execute('SELECT * FROM sample_newsletters WHERE sample_id=?',(sid,)).fetchone()
+        if sample['status']=='completed':
+            return newsletter_dict(db,sample)
+        issues=[i for i in issue_rows(db,sample_id) if i['selected']]
         if not issues:
             raise HTTPException(400,'뉴스레터에 포함할 이슈를 선택해 주세요.')
-        snapshot={'topic':run['topic'],'dates':{'start':run['start_date'],'end':run['end_date']},'issues':issues,'domains':sources(db,run_id)}
-        html=templates.get_template('newsletter.html').render(title=run['topic'],**snapshot)
-        digest=hashlib.sha256(html.encode()).hexdigest()
-        row=db.execute('SELECT * FROM newsletters WHERE run_id=? AND content_hash=?',(run_id,digest)).fetchone()
-        if not row:
-            nid=str(uuid.uuid4())
-            db.execute('''INSERT INTO newsletters (newsletter_id,run_id,user_id,title,html_content,template_version,content_hash,issue_count,snapshot_json,created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?)''',(nid,run_id,user['user_id'],run['topic'],html,TEMPLATE_VERSION,digest,len(issues),json.dumps(snapshot,ensure_ascii=False),now()))
-            event(db,user['user_id'],run_id,'newsletter_created',{'issue_count':len(issues)},nid)
-            row=db.execute('SELECT * FROM newsletters WHERE newsletter_id=?',(nid,)).fetchone()
-        db.execute("UPDATE newsletter_runs SET current_step=3,status='completed',completed_at=?,updated_at=? WHERE run_id=?",(now(),now(),run_id))
-        return newsletter_dict(row)
+        html=templates.get_template('newsletter.html').render(title=sample['topic'],topic=sample['topic'],
+            dates={'start':sample['collection_start_date'],'end':sample['collection_end_date']},issues=issues)
+        stamp=now()
+        db.execute("UPDATE sample_newsletters SET html_content=?,status='completed',completed_at=? WHERE sample_id=?",(html,stamp,sid))
+        return newsletter_dict(db,db.execute('SELECT * FROM sample_newsletters WHERE sample_id=?',(sid,)).fetchone())
 
 
 def owned_newsletter(db, nid, uid):
-    row=db.execute('SELECT * FROM newsletters WHERE newsletter_id=? AND user_id=?',(nid,uid)).fetchone()
+    row=db.execute("SELECT * FROM sample_newsletters WHERE sample_id=? AND user_id=? AND status='completed'",(nid,uid)).fetchone()
     if not row:
         raise HTTPException(404,'뉴스레터를 찾을 수 없습니다.')
     return row
@@ -290,46 +283,35 @@ def owned_newsletter(db, nid, uid):
 @router.get('/newsletters')
 def list_newsletters(user=Depends(member_user)):
     with database() as db:
-        return [newsletter_dict(r) for r in db.execute('SELECT * FROM newsletters WHERE user_id=? AND saved_at IS NOT NULL ORDER BY saved_at DESC',(user['user_id'],))]
+        return [newsletter_dict(db,r) for r in db.execute('SELECT * FROM sample_newsletters WHERE user_id=? AND saved_at IS NOT NULL ORDER BY saved_at DESC',(user['user_id'],))]
 
 
-@router.post('/newsletters/{newsletter_id}/save')
-def save_newsletter(newsletter_id: str, user=Depends(member_user)):
+@router.post('/newsletters/{sample_id}/save')
+def save_newsletter(sample_id: str, user=Depends(member_user)):
     with database() as db:
         db.execute('BEGIN IMMEDIATE')
-        row=owned_newsletter(db,newsletter_id,user['user_id'])
+        row=owned_newsletter(db,sample_id,user['user_id'])
         if not row['saved_at']:
-            db.execute('UPDATE newsletters SET saved_at=? WHERE newsletter_id=?',(now(),newsletter_id))
-            event(db,user['user_id'],row['run_id'],'newsletter_saved',newsletter_id=newsletter_id)
-        return newsletter_dict(owned_newsletter(db,newsletter_id,user['user_id']))
+            db.execute('UPDATE sample_newsletters SET saved_at=? WHERE sample_id=?',(now(),sample_id))
+        return newsletter_dict(db,owned_newsletter(db,sample_id,user['user_id']))
 
 
-@router.get('/newsletters/{newsletter_id}/download')
-def download_newsletter(newsletter_id: str, user=Depends(member_user)):
+@router.get('/newsletters/{sample_id}/download')
+def download_newsletter(sample_id: str, user=Depends(member_user)):
     with database() as db:
-        row=owned_newsletter(db,newsletter_id,user['user_id'])
-        event(db,user['user_id'],row['run_id'],'newsletter_download_requested',newsletter_id=newsletter_id)
+        row=owned_newsletter(db,sample_id,user['user_id'])
         return Response(row['html_content'],media_type='text/html',headers={'Content-Disposition':'attachment; filename="wianews.html"','Cache-Control':'no-store'})
 
 
-class StepBody(BaseModel):
-    step: int = Field(ge=0,le=3)
-
-
-@router.post('/runs/{run_id}/step')
-def record_step(run_id: str, body: StepBody, user=Depends(member_user)):
+@router.get('/llm-requests')
+def llm_usage(user=Depends(member_user)):
     with database() as db:
-        owned_run(db,run_id,user['user_id'])
-        db.execute('UPDATE newsletter_runs SET current_step=?,updated_at=? WHERE run_id=?',(body.step,now(),run_id))
-        event(db,user['user_id'],run_id,'step_changed',{'step':body.step})
-    return {'ok':True}
-
-
-@router.get('/runs/{run_id}/usage')
-def run_usage(run_id: str, user=Depends(member_user)):
-    with database() as db:
-        owned_run(db,run_id,user['user_id'])
-        rows=[dict(r) for r in db.execute('SELECT * FROM ai_requests WHERE run_id=? ORDER BY created_at',(run_id,))]
+        rows=requests_for_user(db,user['user_id'])
         totals={key:sum(r[key] for r in rows if r[key] is not None) for key in ('input_tokens','output_tokens','total_tokens','cached_input_tokens')}
-        return {'run_id':run_id,**totals,'call_count':len(rows),'failed_count':sum(r['status']=='failed' for r in rows),
-                'unknown_usage_count':sum(r['total_tokens'] is None for r in rows),'requests':rows}
+        return {**totals,'call_count':len(rows),'unknown_usage_count':sum(r['total_tokens'] is None for r in rows),'requests':rows}
+
+
+@router.get('/errors')
+def list_errors(user=Depends(member_user)):
+    with database() as db:
+        return [dict(r) for r in db.execute('SELECT * FROM errors WHERE user_id=? ORDER BY created_at DESC,error_id DESC',(user['user_id'],))]

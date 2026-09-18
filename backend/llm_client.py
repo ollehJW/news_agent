@@ -3,7 +3,6 @@ import asyncio
 import logging
 import os
 import time
-import uuid
 from .tracking import start_attempt, finish_attempt
 from pathlib import Path
 
@@ -13,6 +12,13 @@ from openai import AsyncAzureOpenAI, APIConnectionError, APIStatusError, APITime
 
 load_dotenv(Path(__file__).resolve().parents[1] / '.env', override=False)
 log = logging.getLogger(__name__)
+
+
+class CompletionText(str):
+    def __new__(cls, content, request_id):
+        value = super().__new__(cls, content)
+        value.request_id = request_id
+        return value
 
 
 class ConfigurationError(Exception):
@@ -53,10 +59,9 @@ def retry_delay(exc):
 
 
 async def chat_completion(messages, schema, max_tokens=16000, operation="domain_recommendation"):
-    logical_id = str(uuid.uuid4())
     for attempt in range(2):
         started = time.monotonic()
-        request_id = start_attempt(logical_id, operation, attempt + 1)
+        request_id = start_attempt(operation)
         response = None
         try:
             async with create_llm_client() as client:
@@ -72,7 +77,7 @@ async def chat_completion(messages, schema, max_tokens=16000, operation="domain_
             if choice.finish_reason != 'stop' or choice.message.refusal or not choice.message.content:
                 raise InvalidLLMResponse('Incomplete or refused response')
             finish_attempt(request_id, 'success', round((time.monotonic()-started)*1000), response)
-            return choice.message.content
+            return CompletionText(choice.message.content, request_id)
         except asyncio.CancelledError as exc:
             finish_attempt(request_id, 'cancelled', round((time.monotonic()-started)*1000), response, exc)
             raise

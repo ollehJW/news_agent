@@ -14,7 +14,7 @@ Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max
 class RecommendationRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     topic: Topic
-    run_id: str | None = None
+    sample_id: str | None = None
 
 
 def normalize_host(value):
@@ -30,6 +30,7 @@ def normalize_host(value):
 
 
 class Domain(BaseModel):
+    _request_id: str | None = PrivateAttr(default=None)
     _recommendation_rank: int = PrivateAttr(default=0)
     model_config = ConfigDict(extra='forbid')
     host: str
@@ -51,7 +52,7 @@ class LLMRecommendations(BaseModel):
 
 
 class RecommendationResponse(BaseModel):
-    run_id: str | None = None
+    sample_id: str | None = None
     domains: list[Domain]
     source: Literal['llm'] = 'llm'
     notice: str = 'AI가 제안한 추천 후보입니다. 사이트의 현재 운영 상태와 신뢰성은 별도로 확인해 주세요.'
@@ -100,5 +101,6 @@ async def recommend_domains(topic):
         raise InvalidLLMResponse('Invalid domain recommendation payload') from exc
     unique = {}
     for domain in parsed.domains:
+        domain._request_id = getattr(raw, 'request_id', None)
         unique.setdefault(domain.host, domain)
     return RecommendationResponse(domains=list(unique.values()))

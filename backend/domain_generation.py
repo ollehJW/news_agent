@@ -68,6 +68,7 @@ kind는 출처 유형, desc는 사이트 설명, reason은 운영 주체·1차 �
         domain = Domain.model_validate_json(raw)
         if domain.host != candidate.host:
             raise ValueError('Changed host')
+        domain._request_id = getattr(raw, 'request_id', None)
         return domain
     except ValueError as exc:
         raise InvalidLLMResponse('Invalid domain detail') from exc

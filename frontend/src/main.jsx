@@ -15,7 +15,7 @@ const steps = ['주제·도메인 설정', '수집 기간 설정', '뉴스 분�
 const weights = [['기술적 중요성',35],['기술 주체 경쟁력',30],['파급력',25],['최신성',10]];
 function Button({children, primary, className='', ...props}) { return <button className={`button ${primary?'primary':''} ${className}`} {...props}>{children}</button>; }
 function App({user,onLogout}) {
-  const runRef = useRef(null);
+  const sampleRef = useRef(null);
   const [topic,setTopic] = useState('');
   const [dates,setDates] = useState(initialDates);
   const [step,setStep] = useState(0);
@@ -36,20 +36,25 @@ function App({user,onLogout}) {
   useEffect(()=>{let active=true;authRequest('/newsletters').then(rows=>{if(active)setSaved(rows);}).catch(err=>{if(active)setError(err.message);});return()=>{active=false;};},[]);
   useEffect(()=>{if(!toast)return; const id=setTimeout(()=>setToast(''),3500);return()=>clearTimeout(id)},[toast]);
   function updateTopic(value) {setTopic(value);setError('');}
-  async function ensureRun() {
-    if(runRef.current?.topic===topic.trim())return runRef.current.id;
-    const data=await postAuth('/runs',{topic:topic.trim()});
-    runRef.current={id:data.run_id,topic:topic.trim()};return data.run_id;
+  async function ensureSample() {
+    if(sampleRef.current?.topic===topic.trim())return sampleRef.current.id;
+    const data=await postAuth('/samples',{topic:topic.trim()});
+    sampleRef.current={id:data.sample_id,topic:topic.trim()};return data.sample_id;
+  }
+  function adoptSample(id) {
+    sampleRef.current={id,topic:topic.trim()};
+    setDomains(current=>current.map(d=>({...d,sampleId:id})));
   }
   async function syncSources(id,items) {
-    const result=await authRequest(`/runs/${id}/sources`,{method:'PUT',body:JSON.stringify({domains:items.map(d=>({host:d.host,custom:d.custom||d.runId!==id,run_domain_id:d.runId===id?d.run_domain_id:undefined}))})});
-    const mapped=result.map(d=>({...d,runId:id}));setDomains(mapped);return mapped;
+    const result=await authRequest(`/samples/${id}/sources`,{method:'PUT',body:JSON.stringify({domains:items.map(d=>({host:d.host,custom:d.custom||d.sampleId!==id,recommendation_id:d.sampleId===id?d.recommendation_id:undefined}))})});
+    adoptSample(result.sample_id);
+    const mapped=result.domains.map(d=>({...d,sampleId:result.sample_id}));setDomains(mapped);return result.sample_id;
   }
   async function changeDomains(items) {
     if(pending)return;
     if(!topic.trim()){setDomains(items);return;}
     setPending(true);setError('');
-    try{await syncSources(await ensureRun(),items);}catch(err){setError(err.message);}finally{setPending(false);}
+    try{await syncSources(await ensureSample(),items);}catch(err){setError(err.message);}finally{setPending(false);}
   }
   function validSources() {
     if(!topic.trim() || topic.trim().length>120){setError('관심 주제를 1~120자로 입력해 주세요.');return false;}
@@ -59,37 +64,34 @@ function App({user,onLogout}) {
   async function openDomains() {
     if(!topic.trim() || topic.trim().length>120){setError('관심 주제를 1~120자로 입력해 주세요.');return;}
     setPending(true);setError('');
-    try{await syncSources(await ensureRun(),domains);setModal(true);}catch(err){setError(err.message);}finally{setPending(false);}
+    try{await syncSources(await ensureSample(),domains);setModal(true);}catch(err){setError(err.message);}finally{setPending(false);}
   }
   async function addRecommended(selected) {
     setPending(true);setError('');
-    try{const merged=new Map(domains.map(d=>[d.host,d]));for(const domain of selected)if(!merged.has(domain.host))merged.set(domain.host,{...domain,runId:runRef.current.id});await syncSources(runRef.current.id,[...merged.values()]);setModal(false);}catch(err){setError(err.message);throw err;}finally{setPending(false);}
+    try{const merged=new Map(domains.map(d=>[d.host,d]));for(const domain of selected)if(!merged.has(domain.host))merged.set(domain.host,{...domain,sampleId:sampleRef.current.id});await syncSources(sampleRef.current.id,[...merged.values()]);setModal(false);}catch(err){setError(err.message);throw err;}finally{setPending(false);}
   }
   async function nextPeriod() {
     if(!validSources())return;
     setPending(true);setError('');
-    try{const id=await ensureRun();await syncSources(id,domains);await authRequest(`/runs/${id}/period`,{method:'PUT',body:JSON.stringify(dates)});setStep(1);}catch(err){setError(err.message);}finally{setPending(false);}
+    try{let id=await syncSources(await ensureSample(),domains);const period=await authRequest(`/samples/${id}/period`,{method:'PUT',body:JSON.stringify(dates)});id=period.sample_id;adoptSample(id);setStep(1);}catch(err){setError(err.message);}finally{setPending(false);}
   }
   async function collect() {
     if(!validSources()){setStep(0);return;}
     if(!dates.start||!dates.end||dates.start>dates.end){setError('수집 시작일과 종료일을 확인해 주세요.');return;}
     setError('');setPending(true);setStep(2);setProgress(0);setCandidates([]);setIssues([]);setGenerated(null);
-    try{const id=await ensureRun();await syncSources(id,domains);await authRequest(`/runs/${id}/period`,{method:'PUT',body:JSON.stringify(dates)});const result=await postAuth(`/runs/${id}/collect-demo`);setCandidates(result.issues);setIssues(result.issues.filter(n=>n.selected));setProgress(3);}catch(err){setError(err.message);setProgress(-1);setStep(1);}finally{setPending(false);}
+    try{let id=await syncSources(await ensureSample(),domains);const period=await authRequest(`/samples/${id}/period`,{method:'PUT',body:JSON.stringify(dates)});id=period.sample_id;adoptSample(id);const result=await postAuth(`/samples/${id}/collect-demo`);adoptSample(result.sample_id);setCandidates(result.issues);setIssues(result.issues.filter(n=>n.selected));setProgress(3);}catch(err){setError(err.message);setProgress(-1);setStep(1);}finally{setPending(false);}
   }
   async function toggleIssue(id) {
     if(pending)return;
     const selectedIds=new Set(issues.map(n=>n.id));if(selectedIds.has(id))selectedIds.delete(id);else selectedIds.add(id);
     setPending(true);setError('');
-    try{await authRequest(`/runs/${runRef.current.id}/selection`,{method:'PUT',body:JSON.stringify({issue_ids:[...selectedIds]})});setIssues(candidates.filter(n=>selectedIds.has(n.id)));setGenerated(null);}catch(err){setError(err.message);}finally{setPending(false);}
+    try{const result=await authRequest(`/samples/${sampleRef.current.id}/selection`,{method:'PUT',body:JSON.stringify({issue_ids:[...selectedIds]})});adoptSample(result.sample_id);setCandidates(result.issues);setIssues(result.issues.filter(n=>n.selected));setGenerated(null);}catch(err){setError(err.message);}finally{setPending(false);}
   }
   async function makeNewsletter() {
     setPending(true);setError('');
-    try{const letter=await postAuth(`/runs/${runRef.current.id}/newsletter`);setGenerated(letter);setStep(3);}catch(err){setError(err.message);}finally{setPending(false);}
+    try{const letter=await postAuth(`/samples/${sampleRef.current.id}/newsletter`);setGenerated(letter);setStep(3);}catch(err){setError(err.message);}finally{setPending(false);}
   }
-  async function previousStep() {
-    setPending(true);setError('');
-    try{await postAuth(`/runs/${runRef.current.id}/step`,{step:step-1});setStep(step-1);}catch(err){setError(err.message);}finally{setPending(false);}
-  }
+  function previousStep() {setError('');setStep(current=>Math.max(0,current-1));}
   const html=generated?.html||'';
   async function download(letter=generated) {
     if(!letter)return;
@@ -101,7 +103,7 @@ function App({user,onLogout}) {
     setPending(true);setError('');
     try{const entry=await postAuth(`/newsletters/${generated.id}/save`);setGenerated(entry);setSaved(current=>[entry,...current.filter(n=>n.id!==entry.id)]);setToast('뉴스레터를 보관함에 저장했습니다.');}catch(err){setError(err.message);}finally{setPending(false);}
   }
-  function reset(){runRef.current=null;setStep(0);setProgress(-1);setCandidates([]);setIssues([]);setGenerated(null);setOpened(null);setError('');setView('studio');}
+  function reset(){sampleRef.current=null;setStep(0);setProgress(-1);setCandidates([]);setIssues([]);setGenerated(null);setOpened(null);setError('');setView('studio');}
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="brand" href="#" onClick={e=>{e.preventDefault();setView('studio')}}><span className="brand-icon"><Layers3 size={24}/></span><div>WiaNews<small>NEWSLETTER AGENT</small></div></a>
@@ -111,7 +113,7 @@ function App({user,onLogout}) {
     </aside>
     <div className="main-shell"><header className="topbar"><div>Workspace<ChevronRight size={13}/><strong>{view==='studio'?'뉴스레터 만들기':view==='schedules'?'구독 관리':'뉴스레터 보관함'}</strong></div></header>
     <main>
-      <div className="page-heading"><div><div className="eyebrow">YOUR WEEKLY TECH INTELLIGENCE</div><h1>{view==='schedules'?'구독 관리':view==='archive'?'뉴스레터 보관함':'기술의 흐름을, 한눈에.'}</h1><p>{view==='schedules'?'관심 있는 뉴스레터를 구독하고, 원하는 주기와 시간을 설정하세요.':view==='archive'?'직접 만든 뉴스레터를 다시 확인하고 다운로드하세요.':'관심 있는 주제 하나를 알려주세요. 꼭 알아야 할 기술 소식을 Agent가 정리합니다.'}</p></div></div>
+      <div className="page-heading"><div><div className="eyebrow">YOUR WEEKLY TECH INTELLIGENCE</div><h1>{view==='schedules'?'구독 관리':view==='archive'?'뉴스레터 보관함':'기술의 흐름을, 한눈에.'}</h1><p>{view==='schedules'?'관심 있는 뉴스레터를 구독하고, 원하는 발행 주기를 설정하세요.':view==='archive'?'직접 만든 뉴스레터를 다시 확인하고 다운로드하세요.':'관심 있는 주제 하나를 알려주세요. 꼭 알아야 할 기술 소식을 Agent가 정리합니다.'}</p></div></div>
       {error&&<p className="error" role="alert">{error}</p>}
       {view==='schedules'?<Scheduling storageKey={`wianews-schedules-v1:${user.user_id}`} newsletters={saved} notify={setToast}/>:view==='archive'? <section className="panel archive"><div className="section-title"><h2>저장한 뉴스레터 <span className="count">{saved.length}</span></h2><Button disabled={pending} onClick={reset}><Plus size={15}/>새 뉴스레터</Button></div>{opened?<><Button onClick={()=>setOpened(null)}><ArrowLeft size={15}/>목록으로</Button><div className="preview-toolbar"><strong>{opened.title}</strong><Button disabled={pending} onClick={()=>download(opened)}><Download size={15}/>HTML 다운로드</Button></div><iframe title="저장된 뉴스레터" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={opened.html}/></>:saved.length?saved.map(s=><div className="archive-row" key={s.id}><span className="tile-icon"><FileText size={22}/></span><div><h3>{s.title}</h3><p>{s.date} · 핵심 이슈 {s.count}개 · HTML</p></div><Button onClick={()=>setOpened(s)}>열기<ArrowRight size={14}/></Button></div>):<div className="empty"><Bookmark size={36}/><h3>아직 저장한 뉴스레터가 없어요</h3><p>뉴스레터를 완성한 뒤 보관함에 저장해 보세요.</p><Button primary onClick={reset}>첫 뉴스레터 만들기<ArrowRight size={15}/></Button></div>}</section>:<>
       <div className="stepper">{steps.map((s,i)=><React.Fragment key={s}><div className={`step ${step===i?'active':''} ${step>i?'done':''}`}><span>{step>i?<Check size={15}/>:String(i+1).padStart(2,'0')}</span><div><small>STEP {i+1}</small><b>{s}</b></div></div>{i<3&&<div className="step-line"/>}</React.Fragment>)}</div>
@@ -140,7 +142,7 @@ function App({user,onLogout}) {
       </>}
       <footer className="page-footer"><span>WiaNews <span>·</span> 기술을 읽는 더 나은 방법</span><span>Designed for your next idea.</span></footer>
     </main></div>
-    {modal&&<DomainRecommendationModal runId={runRef.current?.id} saving={pending} topic={topic.trim()} existing={domains} onClose={()=>setModal(false)} onAdd={addRecommended}/>}
+    {modal&&<DomainRecommendationModal sampleId={sampleRef.current?.id} saving={pending} topic={topic.trim()} existing={domains} onClose={()=>setModal(false)} onAdd={addRecommended}/>}
     {toast&&<div className="toast" role="status"><Check size={17}/>{toast}</div>}
   </div>;
 }

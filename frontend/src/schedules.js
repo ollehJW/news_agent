@@ -1,4 +1,6 @@
 export const SCHEDULE_KEY = 'wianews-schedules-v1';
+export const PUBLISH_TIME = '08:00';
+export function normalizeSchedule({lookback, ...item}) { return {...item, time: PUBLISH_TIME}; }
 export const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 export function koreaDate(now = new Date()) { return new Date(now.getTime()+9*3600000).toISOString().slice(0,10); }
 export function validateSchedule(item) {
@@ -7,7 +9,6 @@ export function validateSchedule(item) {
   if (!['daily','weekly','monthly'].includes(item.frequency)) return '발행 주기를 선택해 주세요.';
   if (!Array.isArray(item.weekdays) || item.weekdays.some(d=>!Number.isInteger(d)||d<0||d>6) || (item.frequency==='weekly'&&!item.weekdays.length)) return '발행 요일을 1개 이상 선택해 주세요.';
   if (!Number.isInteger(item.monthDay)||item.monthDay<1||item.monthDay>31) return '발행일을 1~31일로 설정해 주세요.';
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time)) return '발행 시간을 입력해 주세요.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(item.startDate)||!Number.isFinite(Date.parse(item.startDate)) || new Date(item.startDate).toISOString().slice(0,10)!==item.startDate) return '시작일을 입력해 주세요.';
   return '';
 }
@@ -18,7 +19,7 @@ export function nextOccurrence(item, now = new Date()) {
   for(let i=0;i<370;i++) {
     const monthLast=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0)).getUTCDate();
     const matches=item.frequency==='daily'||(item.frequency==='weekly'&&item.weekdays.includes(date.getUTCDay()))||(item.frequency==='monthly'&&date.getUTCDate()===Math.min(item.monthDay,monthLast));
-    const candidate=new Date(`${date.toISOString().slice(0,10)}T${item.time}:00+09:00`);
+    const candidate=new Date(`${date.toISOString().slice(0,10)}T${PUBLISH_TIME}:00+09:00`);
     if(matches&&candidate>now)return candidate;
     date.setUTCDate(date.getUTCDate()+1);
   }

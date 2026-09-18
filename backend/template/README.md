@@ -15,4 +15,4 @@
 
 백엔드에서 렌더링할 때 HTML 자동 이스케이프를 활성화하고, 출처 및 이미지 URL은 HTTP/HTTPS 주소인지 검증해 전달합니다. 수집 결과의 `image` 필드는 `imageUrl`로 매핑합니다.
 
-`POST /api/runs/{run_id}/newsletter`에서 이 템플릿을 렌더링하고 HTML과 데이터 스냅샷을 DB에 저장합니다. 프론트엔드 미리보기 및 다운로드는 서버가 생성한 HTML을 사용합니다. 뉴스 수집과 핵심 요약 문장은 현재 예시 데이터입니다.
+`POST /api/samples/{sample_id}/newsletter`에서 이 템플릿을 렌더링하고 샘플 HTML을 `sample_newsletters`에 저장합니다. 도메인·기사·선정 결과는 각 샘플별 테이블에 저장합니다. 프론트엔드 미리보기 및 다운로드는 서버가 생성한 HTML을 사용합니다. 뉴스 수집과 핵심 요약 문장은 현재 예시 데이터입니다.

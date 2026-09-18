@@ -7,10 +7,10 @@ function parseDomain(domain) {
   return { ...domain, host: normalizeDomain(domain.host), mark: domain.name.slice(0, 2) };
 }
 
-export async function streamRecommendedDomains(topic, signal, onDomain, runId) {
+export async function streamRecommendedDomains(topic, signal, onDomain, sampleId) {
   const response = await fetch('/api/domains/recommend/stream', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-WiaNews-Request': '1' },
-    body: JSON.stringify({ topic, run_id: runId }), signal,
+    body: JSON.stringify({ topic, sample_id: sampleId }), signal,
   });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
     if (response.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new Event('wianews-session-expired'));
