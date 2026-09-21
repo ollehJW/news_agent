@@ -35,9 +35,9 @@ CREATE INDEX IF NOT EXISTS llm_requests_user_step ON llm_requests(user_id,step,s
 CREATE TABLE IF NOT EXISTS articles (
  article_id TEXT PRIMARY KEY,
  domain_id TEXT REFERENCES domains(domain_id),
- url TEXT NOT NULL UNIQUE CHECK(length(trim(url))>0), title TEXT NOT NULL,
+ url TEXT NOT NULL UNIQUE CHECK(length(trim(url))>0), title TEXT NOT NULL, newsletter_title TEXT,
  published_at TEXT, content TEXT, highlights TEXT,
- image_url TEXT, collected_at TEXT NOT NULL,
+ image_url TEXT, image_storage_path TEXT, collected_at TEXT NOT NULL,
  request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
  technical_score REAL CHECK(technical_score BETWEEN 0 AND 100),
  organization_score REAL CHECK(organization_score BETWEEN 0 AND 100),

@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
+from backend.mail.delivery import router as mail_router, init_mail_db
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from backend.core.auth import router as auth_router, init_db
@@ -22,12 +23,14 @@ from backend.samples.workflows import router as workflow_router, prepare_recomme
 async def lifespan(app):
     init_db()
     init_newsletter_db()
+    init_mail_db()
     yield
 
 
 app = FastAPI(title='WiaNews API', version='0.2.0', lifespan=lifespan)
 app.router.route_class = ErrorRoute
 app.include_router(auth_router)
+app.include_router(mail_router)
 app.include_router(workflow_router)
 app.include_router(subscriptions_router)
 app.include_router(subject_validation_router)

@@ -12,4 +12,5 @@ def weighted_scores(article):
 
 def evaluation_complete(article):
     return (article.get('score_version')==SCORE_VERSION and bool((article.get('summary') or '').strip())
+            and bool((article.get('newsletter_title') or '').strip())
             and all(isinstance(article.get(k),(int,float)) and 0<=article[k]<=100 for k in BASE_SCORES))

@@ -96,9 +96,9 @@ def issue_rows(db, sample_id):
     rows=[dict(r) for r in rows]
     for r in rows:r.update(weighted_scores(r))
     rows.sort(key=lambda r:(-(r['total_score'] or 0),-date.fromisoformat(r['published_at']).toordinal() if r['published_at'] else 0,r['url']))
-    return [{'id': r['article_id'], 'issue': r['issue_id'], 'article_id':r['article_id'], 'title': r['title'], 'summary': r['summary'],
+    return [{'id': r['article_id'], 'issue': r['issue_id'], 'article_id':r['article_id'], 'title': r['newsletter_title'] or r['title'], 'originalTitle':r['title'], 'newsletterTitle':r['newsletter_title'], 'summary': r['summary'],
              'url': r['url'], 'source': r['host'], 'host': r['host'], 'date': r['published_at'],
-             'imageUrl': r['image_url'], 'imageAlt': r['title'], 'tag': topic,
+             'imageUrl': r['image_url'], 'imageAlt': r['newsletter_title'] or r['title'], 'tag': topic,
              'scores': [r['technical_score'],r['organization_score'],r['impact_score']],
              'score': r['total_score'], 'duplicates': 0, 'selected': r['issue_id'] is not None,
              'rank':r['selected_rank'], 'default_selected': index<5} for index,r in enumerate(rows)]

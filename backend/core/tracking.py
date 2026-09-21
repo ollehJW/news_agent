@@ -108,6 +108,10 @@ def init_newsletter_db():
         migrate_sample_runs(db)
         from backend.migrations.compact_articles import compact_articles
         compact_articles(db)
+        if 'image_storage_path' not in {r['name'] for r in db.execute('PRAGMA table_info(articles)')}:
+            db.execute('ALTER TABLE articles ADD COLUMN image_storage_path TEXT')
+        if 'newsletter_title' not in {r['name'] for r in db.execute('PRAGMA table_info(articles)')}:
+            db.execute('ALTER TABLE articles ADD COLUMN newsletter_title TEXT')
         sample_columns={r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}
         if 'total_summary' not in sample_columns:db.execute('ALTER TABLE sample_newsletters ADD COLUMN total_summary TEXT')
         if 'request_id' not in sample_columns:db.execute('ALTER TABLE sample_newsletters ADD COLUMN request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL')

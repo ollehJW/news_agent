@@ -6,7 +6,7 @@ from backend.integrations.exa_search import canonical_url
 from backend.news.article_images import article_image_url
 from backend.news.scoring_rules import BASE_SCORES,SCORE_VERSION,evaluation_complete
 
-ARTICLE_FIELDS=('domain_id','url','title','published_at','content','summary','highlights','image_url','collected_at','request_id',*BASE_SCORES,'total_score','scored_at','score_version')
+ARTICLE_FIELDS=('domain_id','url','title','newsletter_title','published_at','content','summary','highlights','image_url','image_storage_path','collected_at','request_id',*BASE_SCORES,'total_score','scored_at','score_version')
 
 def decode(row):
     if row is None:return None

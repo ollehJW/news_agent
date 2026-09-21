@@ -50,6 +50,8 @@ def tracked_member_user(request: Request, user=Depends(member_user)):
 
 
 def request_step(path):
+    if path.startswith('/api/newsletter-email'):
+        return 'newsletter_email_send'
     if path.startswith('/api/subject-validations'):
         return 'sample_subject_validation'
     if path.startswith('/api/subscriptions'):

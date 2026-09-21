@@ -49,3 +49,19 @@
 - 과거 데이터는 샘플별로 보존된 메타데이터와 현재 상태에서 추정한 단계로 실행 1건을 이전합니다. 과거 재시도·단계별 시각을 복원한 기록은 아닙니다. 오류 상세는 기존 `errors`에 기록합니다.
 
 - 뉴스레터 생성 시 선택된 N개 기사의 제목·요약을 한 번의 LLM 요청(`sample_newsletter_summary`)에 전달해 기사 전체의 흐름을 종합한 최대 3개 핵심 하이라이트를 생성합니다. `total_summary`는 각 줄이 `- `로 시작하는 문자열이며 호출 ID와 함께 저장합니다. 생성 단계는 `newsletter_summary`이며, 설정·선택 변경 충돌 시 결과를 저장하지 않습니다.
+
+## Newsletter email
+
+`POST /api/newsletter-email` accepts `request_id`, `kind` (`sample` or `subscription`), `newsletter_id`, and `user_ids` (up to 100). It loads authorized HTML and recipient addresses from the database, sends separate HTML MIME messages through Gmail SMTP SSL (465), and records results in `mailing`. Repeating a request ID returns its stored results without resending. `sent` means SMTP acceptance, not guaranteed inbox delivery; `unknown` is not automatically retried.
+
+Set `GMAIL_USER` and `GMAIL_APP_PASSWORD` in the ignored root `.env`. The normal account password is not used. `GMAIL_CA_BUNDLE` and `GMAIL_LEGACY_CA=1` support an already trusted legacy corporate CA while keeping certificate/hostname verification enabled. SMTP network access is required.
+
+On this network, Gmail disconnects after EHLO. Delivery therefore uses the existing AI Lounge handshake: TLS-verified SMTP SSL 465, HELO, then AUTH PLAIN inside TLS. Credentials and authentication payloads must never be logged.
+
+### Mailing history
+
+`mailing` stores one row per send request: UUID `mailing_id`, requesting `user_id`, idempotency `request_id`, `kind`, `newsletter_id` (sample_id when kind=sample), subject, sender_email, mailing_list (JSON user/name/email snapshots), results_json (per-recipient status/email/sent_at/completed_at), status, created_at, sent_at (latest known SMTP acceptance), completed_at. Timestamps use UTC. A completed request can contain failed or unknown recipients; inspect results_json. GET /api/newsletter-email/history returns only the current user's latest 200 requests. Legacy rows are migrated atomically; unavailable historical addresses/acceptance times remain NULL.
+
+### Article images and email CID
+
+Article images are downloaded after shared scoring and saved as validated, resized JPEGs under `backend/workspace/{article_id}/image-{url_hash}.jpg`. `articles.image_storage_path` is relative to backend/. Workspace files are ignored by Git and must be backed up with app.db. Downloads check public hosts and redirects, bound size, and retain TLS verification. Mail preparation retries missing files, reuses local images across recipients, and sends multipart/related CID inline attachments (up to 10 MiB of image data per newsletter). Unavailable images are omitted from email; original HTML and image links remain unchanged. Existing caches survive startup migrations.

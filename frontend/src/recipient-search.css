@@ -28,3 +28,5 @@
 .rs-team-option>span{flex:1;min-width:0;overflow-wrap:anywhere}.rs-team-option>svg{flex-shrink:0;color:#7890ac}
 .rs-team-option strong{color:#315f94;font-weight:700}.rs-team-option.is-active{background:#edf4fb}
 .rs-team-no-results{padding:12px 10px;margin:0;font-size:12px;color:#64748b}
+
+.rs-delivery-result{margin:0 26px 18px;padding:14px 16px;background:#eff6fc;border:1px solid #d8e5f1;border-radius:9px;color:#345577;font-size:13px}.rs-delivery-result p{margin:6px 0 0}

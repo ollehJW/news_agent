@@ -9,3 +9,5 @@ backend/logs/
 
 # Local account database and SQLite sidecars
 backend/app.db*
+
+backend/workspace/
