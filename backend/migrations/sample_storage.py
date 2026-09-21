@@ -1,12 +1,12 @@
 """Sample-owned domain selections and draft samples."""
 import json
 import uuid
-from .auth import now
+from backend.core.auth import now
 
 
 def ensure_draft(db, run_id):
     if 'run_id' not in {r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}:
-        from .sample_lifecycle import legacy_current_sample
+        from backend.samples.sample_lifecycle import legacy_current_sample
         return legacy_current_sample(db,run_id)
     row = db.execute("SELECT sample_id FROM sample_newsletters WHERE run_id=? AND status='draft'", (run_id,)).fetchone()
     if row:

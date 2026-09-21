@@ -1,4 +1,5 @@
 """Migrate legacy editions into shared sample-period editions."""
+from backend.core.paths import BACKEND_DIR
 import json
 import uuid
 
@@ -32,8 +33,8 @@ def migrate_subscription_newsletters(db):
                 if not article or article['sample_id'] != publication['sample_id']:
                     raise RuntimeError('Legacy publication contains an invalid source article')
                 iid = str(uuid.uuid4())
-                db.execute('INSERT INTO subscripted_issues (issue_id,subscription_id,article_id,created_at) VALUES (?,?,?,?)',
-                           (iid,subscriptions[0]['subscription_id'],article_id,publication['created_at']))
+                db.execute('INSERT INTO subscripted_issues (issue_id,subscription_id,article_id,created_at,rank) VALUES (?,?,?,?,?)',
+                           (iid,subscriptions[0]['subscription_id'],article_id,publication['created_at'],len(issue_ids)+1))
                 issue_ids.append(iid)
             db.execute("""INSERT INTO subscripted_newsletters
                 (newsletter_id,sample_id,coverage_start_date,coverage_end_date,issue_ids,html_content,created_at,published_at)
@@ -65,8 +66,7 @@ def migrate_shared_newsletters(db):
     """Preserve subscription associations when removing edition.subscription_id."""
     if 'subscription_id' not in {r['name'] for r in db.execute('PRAGMA table_info(subscripted_newsletters)')}:
         return
-    from pathlib import Path
-    schema = Path(__file__).with_name('newsletter_schema.sql').read_text()
+        schema = (BACKEND_DIR / 'newsletter_schema.sql').read_text()
     start = schema.index('CREATE TABLE IF NOT EXISTS subscripted_newsletters (')
     ddl = schema[start:schema.index(';',start)+1]
     db.execute(ddl.replace('IF NOT EXISTS subscripted_newsletters','subscripted_newsletters_replacement'))

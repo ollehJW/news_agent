@@ -4,19 +4,20 @@ import json
 from contextlib import aclosing
 
 from fastapi import APIRouter, Depends
-from .error_storage import tracked_member_user as member_user, ErrorRoute, record_sample_error
-from .tracking import sample_context
-from .workflows import prepare_recommendation, store_recommendation
+from backend.core.error_storage import tracked_member_user as member_user, ErrorRoute, record_sample_error
+from backend.core.tracking import sample_context
+from backend.samples.workflows import prepare_recommendation, store_recommendation
 from fastapi.responses import StreamingResponse
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
-from .domains import RecommendationRequest
-from .llm_client import ConfigurationError, InvalidLLMResponse
+from backend.recommendations.domains import RecommendationRequest
+from backend.recommendations.query_storage import QueryBatch, QueryPreview, recommend_queries
+from backend.integrations.llm_client import ConfigurationError, InvalidLLMResponse
 
 router = APIRouter(route_class=ErrorRoute)
 
 
-from .domain_generation import generate_domains as stream_domains
+from backend.recommendations.domain_generation import generate_domains as stream_domains
 
 
 def sse(event, data):
@@ -32,6 +33,13 @@ async def recommendation_events(topic, sample_id=None, batch=None):
         async with asyncio.timeout(125):
             async with aclosing(stream_domains(topic)) as domains:
                 async for domain in domains:
+                    if isinstance(domain, QueryPreview):
+                        yield sse('query', domain.model_dump())
+                        continue
+                    if isinstance(domain, QueryBatch):
+                        queries = recommend_queries(sample_id, domain) if sample_id else domain.queries
+                        yield sse('queries', {'queries': queries})
+                        continue
                     count += 1
                     data = domain.model_dump()
                     if sample_id:

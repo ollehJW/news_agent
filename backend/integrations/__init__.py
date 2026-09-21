@@ -1,0 +1,1 @@
+"""WiaNews integrations package."""

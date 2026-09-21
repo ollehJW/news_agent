@@ -5,7 +5,7 @@ import uuid
 from fastapi import Depends, HTTPException, Request
 from fastapi.routing import APIRoute
 from fastapi.exceptions import RequestValidationError
-from .auth import database, member_user, now
+from backend.core.auth import database, member_user, now
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def record_sample_error(sample_id, step, error):
     if not sample_id or getattr(error, '_wianews_error_logged', False):
         return
     with database() as db:
-        row=db.execute('SELECT user_id FROM sample_newsletters WHERE sample_id=?',(sample_id,)).fetchone()
+        row=db.execute('SELECT user_id FROM sample_details WHERE sample_id=?',(sample_id,)).fetchone()
     if row:
         record_error(row['user_id'],step,error)
 
@@ -50,11 +50,15 @@ def tracked_member_user(request: Request, user=Depends(member_user)):
 
 
 def request_step(path):
+    if path.startswith('/api/subject-validations'):
+        return 'sample_subject_validation'
+    if path.startswith('/api/subscriptions'):
+        return {'settings':'subscription_settings','status':'subscription_status','marketplace':'subscription_marketplace','preview':'subscription_newsletter_preview'}.get(path.rsplit('/',1)[-1],'subscription_management')
     if '/domains/recommend' in path:
         return 'sample_domain_recommendation'
     if path.startswith('/api/samples'):
         return {'sources':'sample_domain_selection','period':'sample_period_setting',
-                'collect-demo':'sample_article_collection','selection':'sample_issue_selection',
+                'collect':'sample_article_collection','selection':'sample_issue_selection',
                 'newsletter':'sample_newsletter_generation'}.get(path.rsplit('/',1)[-1],'sample_creation')
     if path.startswith('/api/newsletters'):
         return {'save':'sample_newsletter_save','download':'sample_newsletter_download'}.get(path.rsplit('/',1)[-1],'sample_newsletter_list')

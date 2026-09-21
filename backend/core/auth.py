@@ -1,4 +1,5 @@
 """SQLite accounts and opaque, revocable browser sessions."""
+from backend.core.paths import BACKEND_DIR
 import hashlib
 import hmac
 import os
@@ -15,7 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
-DB_PATH = Path(os.getenv('WIANEWS_DB_PATH', Path(__file__).resolve().parent / 'app.db'))
+DB_PATH = Path(os.getenv('WIANEWS_DB_PATH', BACKEND_DIR / 'app.db'))
 COOKIE = 'wianews_session'
 SESSION_SECONDS = 8 * 3600
 INITIAL_PASSWORD = 'wia1234!'
@@ -292,6 +293,20 @@ class UserBody(BaseModel):
         return value
 
 
+@router.get('/users/directory')
+def user_directory(response: Response, user=Depends(member_user)):
+    response.headers['Cache-Control'] = 'no-store'
+    ranks = ['대표이사','전무','상무','실장','팀장','책임매니저','책임연구원','매니저','연구원','사원']
+    with database() as db:
+        rows = [dict(row) for row in db.execute("""SELECT u.user_id,u.employee_id,u.full_name,u.email,
+            t.name AS team_name,r.name AS role_name FROM users u
+            LEFT JOIN teams t ON t.team_id=u.team_id LEFT JOIN roles r ON r.role_id=u.role_id
+            WHERE u.is_active=1 AND u.is_admin=0""")]
+    return sorted(rows,key=lambda row: (row['team_name'] or '',
+        ranks.index(row['role_name']) if row['role_name'] in ranks else len(ranks),
+        row['full_name'],row['employee_id']))
+
+
 @router.get('/admin/users')
 def users(response: Response, user=Depends(admin_user)):
     response.headers['Cache-Control'] = 'no-store'
@@ -399,9 +414,12 @@ def edit_user(user_id: str, body: UserBody, user=Depends(admin_user)):
 def delete_user(user_id: str, user=Depends(admin_user)):
     if user_id == user['user_id']:
         raise HTTPException(400, '로그인 중인 본인 계정은 삭제할 수 없습니다.')
-    with database() as db:
-        if db.execute('DELETE FROM users WHERE user_id=?', (user_id,)).rowcount != 1:
-            raise HTTPException(404, '계정을 찾을 수 없습니다.')
+    try:
+        with database() as db:
+            if db.execute('DELETE FROM users WHERE user_id=?', (user_id,)).rowcount != 1:
+                raise HTTPException(404, '계정을 찾을 수 없습니다.')
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, '구독 또는 발행 이력에 연결된 계정은 삭제할 수 없습니다.') from None
     return {'ok': True}
 
 

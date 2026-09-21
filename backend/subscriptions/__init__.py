@@ -1,0 +1,1 @@
+"""WiaNews subscriptions package."""

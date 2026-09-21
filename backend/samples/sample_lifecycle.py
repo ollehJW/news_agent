@@ -1,8 +1,8 @@
 """Compact sample records and copy-on-edit lifecycle."""
+from backend.core.paths import BACKEND_DIR
 import json
 import uuid
-from pathlib import Path
-from .auth import now
+from backend.core.auth import now
 
 
 def migrate_sample_newsletters(db):
@@ -14,7 +14,7 @@ def migrate_sample_newsletters(db):
         if 'last_issued_newsletter_id' not in {r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}:
             db.execute('ALTER TABLE sample_newsletters ADD COLUMN last_issued_newsletter_id TEXT REFERENCES subscripted_newsletters(newsletter_id) ON DELETE SET NULL')
         return
-    schema=Path(__file__).with_name('newsletter_schema.sql').read_text()
+    schema=(BACKEND_DIR / 'migrations' / 'legacy_articles.sql').read_text()
     start=schema.index('CREATE TABLE IF NOT EXISTS sample_newsletters (')
     ddl=schema[start:schema.index(';',start)+1].replace('IF NOT EXISTS sample_newsletters','sample_newsletters_replacement')
     db.execute(ddl)
@@ -51,14 +51,16 @@ def legacy_current_sample(db,run_id):
 
 
 def editable_sample(db,sid):
-    from .article_storage import copy_sample_articles
-    row=db.execute('SELECT * FROM sample_newsletters WHERE sample_id=?',(sid,)).fetchone()
+    from backend.samples.article_storage import copy_sample_articles
+    row=db.execute('SELECT * FROM sample_details WHERE sample_id=?',(sid,)).fetchone()
     if row['status']=='draft':
         return sid,{}
     new_id=str(uuid.uuid4())
-    db.execute('''INSERT INTO sample_newsletters
-        (sample_id,user_id,topic,collection_start_date,collection_end_date,status,created_at)
-        VALUES (?,?,?,?,?,'draft',?)''',(new_id,row['user_id'],row['topic'],row['collection_start_date'],row['collection_end_date'],now()))
+    from backend.samples.runs import create_run
+    db.execute('INSERT INTO sample_newsletters (sample_id,created_at) VALUES (?,?)',(new_id,now()))
+    create_run(db,new_id,row['user_id'],row['topic'],row['collection_start_date'],row['collection_end_date'],'topic_setup')
     db.execute('INSERT INTO sample_domains SELECT ?,domain_id,request_id,kind,description,recommendation_reason,topic_relevance,created_at FROM sample_domains WHERE sample_id=?',(new_id,sid))
-    _,issue_ids=copy_sample_articles(db,sid,new_id)
-    return new_id,issue_ids
+    for query in db.execute('SELECT * FROM sample_queries WHERE sample_id=? ORDER BY position',(sid,)).fetchall():
+        db.execute('INSERT INTO sample_queries VALUES (?,?,?,?,?,?)',(str(uuid.uuid4()),new_id,query['request_id'],query['query'],query['position'],query['created_at']))
+    article_ids,_=copy_sample_articles(db,sid,new_id)
+    return new_id,article_ids

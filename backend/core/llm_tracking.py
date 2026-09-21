@@ -1,5 +1,5 @@
 """Compact per-user LLM request records."""
-from pathlib import Path
+from backend.core.paths import BACKEND_DIR
 
 
 def step_name(operation):
@@ -10,7 +10,7 @@ def migrate_llm_requests(db):
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ai_requests'").fetchone():
         return
     db.execute('ALTER TABLE ai_requests RENAME TO llm_requests')
-    schema=Path(__file__).with_name('newsletter_schema.sql').read_text()
+    schema=(BACKEND_DIR / 'newsletter_schema.sql').read_text()
     start=schema.index('CREATE TABLE IF NOT EXISTS llm_requests (')
     statement=schema[start:schema.index(';',start)+1].replace('IF NOT EXISTS llm_requests','llm_requests_replacement')
     db.execute(statement)

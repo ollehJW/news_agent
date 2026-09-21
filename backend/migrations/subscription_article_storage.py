@@ -1,6 +1,6 @@
 """Migrate accumulated raw subscription articles to the compact schema."""
+from backend.core.paths import BACKEND_DIR
 import uuid
-from pathlib import Path
 from urllib.parse import urlsplit
 
 
@@ -8,7 +8,7 @@ def migrate_subscription_articles(db):
     columns={r['name'] for r in db.execute('PRAGMA table_info(subscripted_articles)')}
     if 'canonical_url' not in columns:
         return
-    schema=Path(__file__).with_name('newsletter_schema.sql').read_text()
+    schema=(BACKEND_DIR / 'migrations' / 'legacy_articles.sql').read_text()
     start=schema.index('CREATE TABLE IF NOT EXISTS subscripted_articles (')
     ddl=schema[start:schema.index(';',start)+1].replace('IF NOT EXISTS subscripted_articles','subscripted_articles_replacement')
     db.execute(ddl)
@@ -22,7 +22,7 @@ def migrate_subscription_articles(db):
         did=domain[0] if domain else str(uuid.uuid4())
         if not domain:
             db.execute('INSERT INTO domains (domain_id,host,created_at) VALUES (?,?,?)',(did,host,row['collected_at']))
-        db.execute('INSERT INTO subscripted_articles_replacement VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        db.execute('INSERT INTO subscripted_articles_replacement (article_id,sample_id,domain_id,request_id,url,title,published_at,content,image_url,favicon_url,image_storage_path,collected_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                    (row['article_id'],row['sample_id'],did,None,url,row['title'],row['published_at'],
                     row['content'],row['image_url'],row['favicon_url'],row['image_storage_path'],row['collected_at']))
     db.execute('DROP TABLE subscripted_articles')

@@ -1,0 +1,46 @@
+.subject-check-action{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-top:22px;flex-wrap:wrap}
+.subject-check-complete{order:-1;display:inline-flex;align-items:center;gap:5px;color:#35634e;font-size:12px}
+.subject-validation-dialog{width:860px;max-width:90vw;max-height:85vh;padding:0;border:1px solid #dce2ea;border-radius:12px;box-shadow:0 20px 80px #172c4833;color:#20354e}
+.subject-validation-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+.subject-validation-dialog::backdrop{background:#1a2c4866;backdrop-filter:blur(3px)}
+.subject-validation-header{display:flex;align-items:flex-start;gap:14px;padding:24px;border-bottom:1px solid #e5e8ed;flex-shrink:0}
+.subject-validation-header>div{flex:1;min-width:0}
+.subject-validation-header h2{margin:0;font-size:20px;line-height:1.5}
+.subject-validation-header p{margin:7px 0 0;color:#53647b;font-size:13px;line-height:1.7;overflow-wrap:anywhere}
+
+.subject-validation-results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;padding:24px;overflow-y:auto;background:#f3f5f8;min-height:0}
+.subject-match{display:flex;flex-direction:column;min-width:0;padding:22px;background:#fffdf9;border:1px solid #e0e3e7;border-top:3px solid #284766;border-radius:4px 4px 10px 10px;box-shadow:0 3px 10px #233c5510}
+.subject-match:only-child{grid-column:1/-1}
+.subject-match-masthead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:15px;border-bottom:1px solid #e5e4df}
+.subject-match-masthead>span:first-child{display:flex;align-items:center;gap:7px;font-size:17px;font-weight:800;letter-spacing:-.6px;color:#284766}
+.subject-match-number{font-size:13px;color:#6e7e90;font-variant-numeric:tabular-nums;letter-spacing:2px}
+.subject-match-copy{padding:18px 0 16px}
+.subject-match h3{margin:0;font-size:20px;line-height:1.5;letter-spacing:-.5px;overflow-wrap:anywhere;color:#20354e}
+.subject-match-meta{display:flex;align-items:center;gap:12px;color:#53647b;font-size:12px;margin-top:12px;flex-wrap:wrap}
+.subject-match-meta>span{display:inline-flex;align-items:center;gap:5px}
+.subject-match-meta .subject-match-status{color:#35634e;background:#eaf3eb;padding:3px 7px;border-radius:5px;font-size:11px;font-weight:600}
+.subject-match-reason{background:#eff3f7;border-radius:7px;padding:13px 14px;margin-bottom:16px}
+.subject-match-reason>span{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#375577}
+.subject-match-reason p{margin:6px 0 0;color:#41556c;font-size:13px;line-height:1.75;overflow-wrap:anywhere}
+.subject-match-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:auto;padding-top:2px}
+.subject-match-actions .button{width:100%;min-width:0;min-height:38px;padding:8px 5px;gap:5px;justify-content:center;font-size:11px;white-space:nowrap}
+.subject-match-actions .button svg{flex-shrink:0}
+.subject-validation-footer{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 24px;background:#fff;border-top:1px solid #e5e8ed;flex-shrink:0}
+.subject-validation-footer>span{font-size:12px;color:#53647b;line-height:1.6}
+.subject-validation-footer>.button{flex-shrink:0}
+.subject-validation-error{margin:0;padding:12px 24px;flex-shrink:0}
+
+.subject-status-dialog[open]{width:460px;align-items:center;padding:36px 30px;text-align:center;gap:0}
+.subject-status-icon{display:grid;place-items:center;width:62px;height:62px;border-radius:50%;background:#edf2f8;color:#365779;margin-bottom:22px}
+.subject-status-icon.complete{background:#eaf3eb;color:#35634e}
+.subject-status-dialog h2{margin:0;font-size:19px;line-height:1.6;color:#20354e}
+.subject-status-dialog p{margin:8px 0 24px;font-size:14px;color:#53647b}
+.subject-status-dialog .button{min-width:120px;justify-content:center}
+.subject-status-progress{height:5px;width:100%;margin-top:28px;background:#e7edf4;border-radius:8px;overflow:hidden}
+.subject-status-progress span{display:block;height:100%;width:38%;background:#426789;border-radius:8px;animation:subject-search-progress 1.6s ease-in-out infinite}
+@keyframes subject-search-progress{0%{transform:translateX(-110%)}100%{transform:translateX(370%)}}
+@media(prefers-reduced-motion:reduce){.subject-status-progress span{animation:none;width:100%;opacity:.6}}
+
+.topic-bottom-row{display:flex;align-items:flex-end;gap:16px;margin-top:18px}
+.topic-bottom-row .suggestions{flex:1;min-width:0;margin:0}
+.topic-bottom-row .subject-check-action{flex-shrink:0;margin:0;flex-direction:column;align-items:flex-end;gap:7px}

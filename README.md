@@ -63,7 +63,7 @@ API 키는 프론트엔드에 전달하지 않으며 `.env`는 Git에서 제외�
 ```
 
 - Azure OpenAI Chat Completions의 JSON 스키마 응답을 사용합니다. [OpenAI 공식 문서](https://developers.openai.com/api/docs/guides/structured-outputs)를 참고했습니다.
-- `backend/llm_client.py`는 `wiameet_dev/backend/llm_client.py`의 환경변수 이름, Azure 연결 방식, 제한적 재시도 방식을 참고한 비동기 클라이언트입니다.
+- `backend/integrations/llm_client.py`는 `wiameet_dev/backend/llm_client.py`의 환경변수 이름, Azure 연결 방식, 제한적 재시도 방식을 참고한 비동기 클라이언트입니다.
 - 최대 20개 추천 후보를 반환합니다. 알려진 후보가 없으면 빈 배열입니다. 정적 추천 목록으로 대체하지 않습니다.
 - 호스트 형식 검증, `www.` 정규화와 중복 제거를 수행합니다. 잘못된 모델 출력은 502로 반환합니다.
 - **웹 검색·DNS 확인·사이트 접속은 수행하지 않습니다.** 추천 이유는 모델이 작성한 설명이며 실제 신뢰성 검증 결과가 아닙니다.
@@ -94,11 +94,13 @@ npm run build
 
 ## 주요 코드
 
+백엔드 폴더별 역할은 [backend/README.md](backend/README.md)를 참고하세요.
+
 - `backend/main.py`: FastAPI 엔드포인트와 오류 응답
-- `backend/streaming.py`: 완성된 도메인을 SSE 이벤트로 전달
-- `backend/domain_generation.py`: 후보 선정과 최대 3개 동시 상세 생성
-- `backend/domains.py`: 입력/출력 모델, 추천 프롬프트, 호스트 검증
-- `backend/llm_client.py`: Azure OpenAI 연결과 재시도
+- `backend/recommendations/streaming.py`: 완성된 도메인을 SSE 이벤트로 전달
+- `backend/recommendations/domain_generation.py`: 후보 선정과 최대 3개 동시 상세 생성
+- `backend/recommendations/domains.py`: 입력/출력 모델, 추천 프롬프트, 호스트 검증
+- `backend/integrations/llm_client.py`: Azure OpenAI 연결과 재시도
 - `frontend/src/api.js`: 추천 API 호출
 - `frontend/src/main.jsx`: 주제·도메인, 수집 기간과 뉴스레터 화면 흐름
 - `frontend/src/DomainSetup.jsx`: 도메인 관리 박스, 추천 스트리밍, 체크박스 선택·추가
@@ -110,7 +112,7 @@ npm run build
 - 관리자는 **계정 관리**만 사용하며, 계정·팀을 추가할 수 있습니다.
 - 추가한 모든 계정의 초기 비밀번호는 `wia1234!`입니다. 첫 로그인 후 비밀번호 변경을 완료해야 뉴스레터 또는 관리자 기능을 사용할 수 있습니다.
 - 새 비밀번호는 영문·숫자·특수문자를 포함한 8~128자입니다.
-- 일반 사용자는 뉴스레터 만들기·구독 관리·보관함을 사용합니다. 뉴스레터 보관함은 서버 DB에 저장하고 구독 설정은 사용자 UUID별 브라우저 키로 분리했습니다. 로그인 전의 공용 저장 자료는 자동으로 다른 계정에 할당하지 않습니다.
+- 일반 사용자는 뉴스레터 만들기·구독 관리·보관함을 사용합니다. 뉴스레터 보관함과 구독 관계·발행 설정은 서버 DB에 저장합니다. 로그인 전의 공용 저장 자료는 자동으로 다른 계정에 할당하지 않습니다.
 
 ### 데이터베이스
 
@@ -173,26 +175,26 @@ API 변경 요청에는 `X-WiaNews-Request: 1` 헤더가 필요합니다. 브라
 
 - 모든 실행·보관함 API는 소유자를 검사합니다. 초기 비밀번호 변경 전 사용자와 관리자는 뉴스레터 API를 사용할 수 없습니다.
 - 추천은 `sample_id`를 받아 기존 샘플에 연결하며, 생략하면 새 초안을 생성합니다. 추천 후보는 서명된 토큰으로 전달하고 선택한 출처만 sample_domains에 저장합니다.
-- `/api/samples` 생성·조회, `/api/samples/{sample_id}` 상세 조회를 제공합니다. sources, period, selection은 PUT, collect-demo, newsletter는 POST입니다. 수정 API는 현재 sample_id를 반환하며 완성본 수정 시 새 ID로 바뀝니다. 화면은 반환 ID를 다음 요청에 사용합니다.
+- `/api/samples` 생성·조회, `/api/samples/{sample_id}` 상세 조회를 제공합니다. sources, period, selection은 PUT, collect, newsletter는 POST입니다. collect는 SSE 진행 이벤트와 최종 결과를 반환합니다. 수정 API는 현재 sample_id를 반환하며 완성본 수정 시 새 ID로 바뀝니다. 화면은 반환 ID를 다음 요청에 사용합니다.
 - 진행 단계는 React 상태로 관리합니다. 서버에 current_step·updated_at·error_message 컬럼을 추가하지 않으며, newsletter_runs 및 단계 이동 API는 제거했습니다.
 - `/api/newsletters`는 저장한 뉴스레터 목록이며, `/{newsletter_id}/save`는 POST, `/{newsletter_id}/download`는 GET입니다. 생성 당시 HTML은 이후 재수집해도 유지됩니다.
 - `/api/llm-requests`에서 로그인한 사용자 본인의 호출 기록과 사용량 합계를 조회합니다. 공급자가 사용량을 보내지 않은 실패·취소 호출의 토큰은 NULL이며 추정하지 않습니다. 합계는 확인된 사용량만 더합니다.
 - Exa `results[].image`는 `image_url`, `favicon`은 `favicon_url`에 대응합니다. `image_storage_path`는 향후 이미지 파일 저장용으로 준비했습니다. 현재 Exa 수집·이미지 다운로드는 구현하지 않았습니다.
-- 예시 수집은 `data_mode=demo`로 구분하며 LLM 토큰 사용량을 생성하지 않습니다.
-- 기존 브라우저 보관함 데이터는 자동 이관하지 않습니다. 구독 관리는 프론트엔드 설정 기능이며 자동 실행·발송 백엔드는 아직 없습니다.
+- 샘플 수집은 Exa와 LLM을 사용하며 `data_mode=live`로 반환합니다. 주제·중복 통합 전처리와 스코어링 호출은 llm_requests에 기록됩니다.
+- 기존 브라우저 보관함 데이터는 자동 이관하지 않습니다. 구독 추가·조회·수정·상태 변경은 DB에 연결되어 있으며 자동 수집·발송은 아직 없습니다.
 - 기존 `roles.code`는 시작 시 제거하며 직급 ID와 사용자 연결, 비밀번호, 관리자 권한을 유지합니다.
 
 
 ## 구독 데이터베이스
 
-다음 구독 테이블은 서버 시작 시 생성됩니다. 현재는 스키마만 추가했으며 구독 화면의 브라우저 저장을 DB로 이관하거나 구독 API·매일 수집·자동 발행을 구현하지 않았습니다.
+다음 구독 테이블은 서버 시작 시 생성됩니다. 구독 화면은 DB 저장·조회 API를 사용합니다. 기존 localStorage 설정은 자동 이관하지 않습니다. 매일 수집·자동 발행은 아직 구현하지 않았습니다.
 
 - `subscripted_articles`: 기준 뉴스레터별 누적 기사. `(sample_id, url)`로 중복을 방지하며 원문 발행일·수집 시각과 이미지 정보를 저장합니다. 발행일을 알 수 없으면 NULL로 유지합니다.
 - `subscriptions`: 샘플별 사용자 구독 관계. `subscription_id`, `sample_id`, `user_id`, `status`, `created_at`, `updated_at`을 저장합니다. `(sample_id, user_id)`는 유일하며 상태는 active/paused/cancelled입니다. 기존 newsletter_subscriptions의 구독 관계와 상태·시각을 이관하고 발행 설정 컬럼은 제거합니다.
 - `subscripted_issues`: 사용자별 구독에서 자동 선정된 기사와 요약·점수·LLM 요청 참조.
 - `subscripted_newsletters`: 샘플·수집 기간별 공유 발행본. `newsletter_id`, `sample_id`, `coverage_start_date`, `coverage_end_date`, `issue_ids`, `summary`, `request_id`, `html_content`, `created_at`, `published_at`을 저장합니다. issue_ids 배열 순서가 표시 순서이며, 샘플·커버 기간 조합은 고유합니다. summary는 이번 호 핵심 요약, request_id는 그 요약 생성 호출입니다. 아직 발행 전이면 published_at은 NULL입니다. JSON 내 이슈의 존재·중복·원문 기사의 해당 샘플 소속은 향후 발행 API에서 검증해야 합니다. 이슈의 subscription_id는 생성 출처를 나타내며, 발행본을 받는 구독은 subscription_history로 관리합니다. 요약 LLM 호출 단계는 `subscription_newsletter_summary`로 구분할 예정입니다.
 
-기준 샘플의 주제는 `sample_newsletters.topic`, 도메인은 `sample_domains`를 사용합니다. 참조 중인 기준 뉴스레터는 삭제를 제한하여 누적 기사와 공동 발행 이력을 보호합니다. 현재 계정 삭제의 연쇄 삭제도 이 제한을 받으므로 구독 API 도입 시 계정 삭제·공동 데이터 보존 정책을 함께 연결해야 합니다.
+기준 샘플의 주제는 `sample_newsletters.topic`, 도메인은 `sample_domains`를 사용합니다. 참조 중인 기준 뉴스레터는 삭제를 제한하여 누적 기사와 공동 발행 이력을 보호합니다. 계정 삭제가 구독·발행 참조를 훼손하는 경우 409 오류로 차단합니다.
 
 
 ### 샘플과 실제 발행 결과 분리
@@ -265,3 +267,55 @@ API 변경 요청에는 `X-WiaNews-Request: 1` 헤더가 필요합니다. 브라
 ### 사용자별 오류 기록
 
 `errors`의 컬럼은 `error_id`, `user_id`, `step`, `error_type`, `message`, `request_id`, `created_at`입니다. `/api/errors`는 로그인한 일반 사용자 본인의 오류만 반환합니다. 단계는 sample_domain_recommendation, sample_domain_selection, sample_period_setting, sample_article_collection, sample_issue_selection, sample_newsletter_generation, sample_newsletter_save, sample_newsletter_download 등으로 구분합니다. LLM 실패 시 해당 request_id를 연결하고 그 밖의 오류는 NULL입니다. 재시도 전 실패도 기록하고 정상 취소는 오류로 기록하지 않습니다. 공급자 응답 원문·프롬프트·인증 정보 대신 정제된 오류 메시지를 저장합니다. 기존 newsletter_runs의 error_message는 errors로 이관하고, 샘플이 없는 미완료 작업은 초안을 보존한 후 테이블을 제거합니다. 오류 조회 UI와 자동 구독 실행은 아직 구현하지 않았습니다.
+
+### 구독 저장 API
+
+- `GET /api/subscriptions`: 내 구독 목록(active/paused) 및 발행 설정·기준 샘플 정보.
+- `POST /api/subscriptions`: sample_id와 settings(name, frequency, weekdays, month_day, start_date)를 받아 구독 관계와 설정을 한 트랜잭션으로 저장합니다. 마켓플레이스에서도 개인별 설정 팝업을 열어 저장합니다. settings를 생략한 API 요청은 주제 이름·매주 월요일·한국 시간 오늘의 기본값을 사용하며 다른 사용자의 설정을 복사하지 않습니다.
+- `PUT /api/subscriptions/{subscription_id}/settings`: 본인의 구독 이름·발행 설정 수정. 구독의 sample_id는 변경하지 않습니다.
+- `PATCH /api/subscriptions/{subscription_id}/status`: active/paused/cancelled 변경. `DELETE /api/subscriptions/{subscription_id}`는 cancelled로 변경하며 행을 삭제하지 않습니다.
+- `GET /api/subscriptions/marketplace`: 구독 이력이 있는 완성 샘플의 주제·출처·활성 구독자 수·최초 등록 시각(registered_at)·첫 정식 발행 시각(first_published_at)·내 구독 상태. 카드의 발행 시작일은 첫 정식 발행 시각을 한국 날짜로 표시하며 발행본이 없으면 발행 전으로 표시합니다. 개인 구독 이름과 발행 설정은 노출하지 않습니다. 화면은 활성 구독자 수 기준 인기순이 기본이며 최초 등록 시각 기준 최신순을 선택할 수 있습니다. 수집 출처는 팝업에서 전체 목록을 확인합니다.
+
+`subscription_settings`는 subscription_id(PK/FK), name, frequency, weekdays(JSON), month_day, start_date를 저장합니다. 발행 시각은 08:00 KST 고정입니다. 구독 생성은 소유한 저장 샘플 또는 이미 구독 이력이 있는 공개 샘플만 허용하고, 다른 사람의 비공개 샘플·초안은 거절합니다. 중복 구독 요청은 기존 행을 반환하며 cancelled 상태의 재구독은 기존 ID를 재사용합니다. 구독 추가만으로 기사·이슈·발행본·subscription_history·LLM 요청을 만들지 않습니다. 이 API에는 Exa 호출, 예약 실행, 메일 발송이 없습니다.
+
+### 마켓플레이스 뉴스레터 미리보기
+
+`GET /api/subscriptions/marketplace/{sample_id}/preview`는 구독 가능한 샘플만 조회합니다. sample_newsletters.last_issued_newsletter_id가 가리키는 동일 샘플의 실제 발행본(published_at이 있는 행)을 우선 반환하고, 없으면 초기 sample_newsletters.html_content를 반환합니다. 응답은 kind(sample/published), sample_id, newsletter_id, topic, html, published_at, dates를 포함하며 캐시하지 않습니다. 화면의 주제 아래 미리 보기 버튼은 서버 HTML을 sandbox iframe 팝업에 표시합니다. 미리보기는 수집·생성·구독 이력을 만들지 않습니다.
+
+### 제작 전 유사 주제 확인
+
+뉴스레터 만들기에서 **비슷한 뉴스레터 확인** 버튼을 누르면 `POST /api/subject-validations`에 topic을 보냅니다. 현재 active 구독자가 있는 완성 샘플의 주제들을 LLM으로 비교합니다. 비교 대상과 사용자 주제는 지시가 아닌 데이터로 전달하며, 응답 ID가 실제 후보인지 검증합니다. 75점 이상인 유사 주제 최대 5개를 추천하고 낮은 점수는 제외합니다. 비교할 후보가 없으면 LLM 호출 없이 완료합니다. 오류를 빈 추천으로 처리하지 않습니다.
+
+- 유사 주제가 없으면 도메인 설정을 표시합니다. 입력 주제가 바뀌면 확인을 다시 해야 합니다.
+- 유사 주제가 있으면 추천 이유와 구독자 수를 팝업에 표시합니다. 새로 만들기는 도메인 설정을 열고, 구독하러 가기는 기본 개인 설정(매주 월요일 08:00 KST, 오늘 시작)으로 구독한 후 내 구독 화면으로 이동합니다. 이미 구독 중이면 재생성하지 않고, 일시정지 상태면 재개합니다. 발행 설정은 내 구독에서 수정할 수 있습니다.
+- `subject_validation`: validation_id, user_id, topic, request_id, candidates_json, matches_json, status(processing/completed/failed/cancelled), created_at, completed_at. 비교 대상 주제와 추천 점수·이유의 당시 결과를 보관합니다. request_id는 마지막 LLM 시도를 가리키며 재시도도 각각 llm_requests에 기록됩니다.
+- LLM 호출 단계는 `sample_subject_validation`이며 모델·토큰·소요 시간을 llm_requests에 기록합니다. 실패는 errors에 연결하고 `GET /api/subject-validations`에서 본인의 실행 이력만 조회합니다.
+- 이 과정은 Exa 수집이나 뉴스레터 발행을 실행하지 않습니다. 실행 전 후보가 없으면 request_id는 NULL입니다.
+
+### 샘플 검색 쿼리
+
+도메인 후보 선정 호출에서 주제에 맞는 영어 중심의 자연어 검색 쿼리 3~5개를 함께 생성합니다. 기본은 영어 4개와 한국어 1개이며, 좁은 주제는 영어 2~3개와 한국어 1개로 구성합니다. 추천 프롬프트는 영어로 작성하고 도메인 설명은 한국어로 출력합니다. 주제 범위에 따라 검색 관점을 분리하며, 검색 도메인·수집 기간은 쿼리에 넣지 않고 이후 검색 필터로 적용합니다.
+
+- `sample_queries`: `query_id` (UUID), `sample_id`, `request_id`, `query`, `position` (1~5), `created_at`.
+- `request_id`는 쿼리를 생성한 도메인 추천 LLM 호출을 참조합니다. 별도 LLM 호출은 추가하지 않습니다.
+- 추천은 후보로만 전달합니다. 팝업에서 선택한 쿼리·도메인을 추가할 때 함께 저장하며, 취소·실패 시 기존 쿼리를 보존합니다. 직접 추가·삭제도 지원하고 공백·대소문자가 같은 쿼리는 통합합니다. 직접 추가한 쿼리의 request_id는 NULL입니다.
+- SSE 응답은 LLM이 쿼리 문장을 완성할 때마다 `query` 이벤트로 미리 표시합니다. 전체 후보 응답 검증 후 `queries` 이벤트로 서명된 추천 후보를 제공하고, 기존 `domain` 이벤트를 이어서 전달합니다. 중단된 미완성 응답의 쿼리는 저장하지 않습니다. 일반 추천 API는 `queries` 문자열 배열과 서명된 `query_recommendations`를 반환하며, `GET /api/samples/{sample_id}`에서 ID를 포함한 저장 결과를 조회합니다.
+- 완료된 샘플을 편집해 복제하면 쿼리도 새로운 `query_id`로 복제하고 원래 `request_id`를 유지합니다. Exa 검색 실행은 아직 연결하지 않습니다.
+
+
+### 실제 샘플 뉴스 수집
+
+`POST /api/samples/{sample_id}/collect`는 저장된 쿼리(최대 5개), 도메인, 수집 기간을 사용합니다. 날짜는 KST 시작일 00:00부터 종료일 다음 날 00:00 미만입니다. 쿼리당 최대 10건을 검색하고, URL 중복·출처 도메인·발행일·본문을 검사합니다. 발행일 누락/기간 밖, 허용 출처 밖, 본문 부족 결과는 제외하며 검색 조건을 임의로 확대하지 않습니다.
+
+모듈 구성:
+- `backend/integrations/exa_search.py`: 샘플·구독 공통 Exa 검색 및 기본 결과 검증.
+- `backend/samples/sample_preprocessing.py`: 샘플용 주제 적합성·내용 중복을 전체 후보에 대해 한 번에 판단하고 keep_indices 정수 배열만 반환합니다. 구독용 과거 기사 비교는 별도 전처리 모듈로 추가할 예정입니다.
+- `backend/news/news_scoring.py`: 샘플·구독 공통 중요도 계산 및 전처리 통과 기사만 한국어 요약 생성. 호출자가 llm_requests step을 전달합니다.
+- `backend/news/news_analysis_common.py`: 공통 JSON 결과 ID 검증·동시 실행 제한.
+- `backend/samples/sample_collection.py`: 샘플 설정 로딩, 진행 이벤트, 원본·이슈 저장, 상위 5개 기본 선택.
+
+원본 본문·발행일·대표 이미지 URL·favicon은 sample_articles에, 전처리를 통과한 이슈의 점수와 선택 상태는 sample_issues에 저장합니다. 이미지 파일 다운로드는 수행하지 않으므로 image_storage_path는 NULL입니다. 주제·내용 중복으로 제외한 기사는 원본에만 남고 이슈로 선정하지 않습니다. 인덱스만 반환하므로 제외 사유별 개수나 새 중복 관계를 추정해서 저장하지 않습니다. 실패 시 기존 기사·이슈를 교체하지 않으며, 완료된 샘플의 재수집 결과는 새 초안으로 저장합니다.
+
+스코어: 기술 35%, 기술 개발 주체 경쟁력 30%, 파급력 25%, 최신성 10%. 최신성은 수집 종료일 기준 발행 후 경과 일수로 0~1일 100, 2~3일 90, 4~7일 80, 8~14일 65, 15~30일 50, 이후 30점입니다. 총점 내림차순, 발행일 내림차순, URL 순으로 정렬하고 최대 5개를 기본 선택합니다. 사용자가 최종 선택을 변경할 수 있습니다.
+
+환경변수: `EXA_API_KEY` 필수. 사내 CA 환경은 `EXA_CA_BUNDLE`에 인증서 번들을 지정할 수 있으며, 오래된 사내 CA 확장 호환이 필요할 때만 `EXA_LEGACY_CA=1`을 사용합니다. TLS 인증서/호스트 검증은 유지합니다. 검색은 동시 3개, LLM 전처리는 전체 후보 최대 50건을 1회 비교(기사당 본문 최대 6,000자, 전체 본문 최대 180,000자, 출력 한도 1,000토큰), 스코어링·요약은 8기사씩 동시 3개, 전체 수집 제한은 360초입니다. 스트림은 10초마다 heartbeat를 보내고 브라우저 연결 종료 시 남은 작업을 취소합니다.

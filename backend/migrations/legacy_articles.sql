@@ -4,24 +4,16 @@ CREATE TABLE IF NOT EXISTS domains (
 );
 CREATE TABLE IF NOT EXISTS sample_newsletters (
  sample_id TEXT PRIMARY KEY,
- html_content TEXT, total_summary TEXT,
- request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
- created_at TEXT NOT NULL, saved_at TEXT,
- last_issued_newsletter_id TEXT REFERENCES subscripted_newsletters(newsletter_id) ON DELETE SET NULL
-);
-CREATE TABLE IF NOT EXISTS sample_runs (
- run_id TEXT PRIMARY KEY,
- sample_id TEXT NOT NULL REFERENCES sample_newsletters(sample_id) ON DELETE CASCADE,
  user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
  topic TEXT NOT NULL,
  collection_start_date TEXT, collection_end_date TEXT,
- current_step TEXT NOT NULL DEFAULT 'topic_setup',
- status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','running','completed','failed','cancelled')),
- started_at TEXT NOT NULL, completed_at TEXT,
- CHECK(collection_start_date IS NULL OR collection_end_date IS NULL OR collection_end_date>=collection_start_date)
+ status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','completed')),
+ html_content TEXT, created_at TEXT NOT NULL, completed_at TEXT, saved_at TEXT,
+ last_issued_newsletter_id TEXT REFERENCES subscripted_newsletters(newsletter_id) ON DELETE SET NULL,
+ CHECK(collection_start_date IS NULL OR collection_end_date IS NULL OR collection_end_date>=collection_start_date),
+ CHECK(status!='completed' OR (html_content IS NOT NULL AND completed_at IS NOT NULL))
 );
-CREATE INDEX IF NOT EXISTS sample_runs_sample ON sample_runs(sample_id,started_at);
-CREATE INDEX IF NOT EXISTS sample_runs_user ON sample_runs(user_id,started_at);
+CREATE INDEX IF NOT EXISTS sample_newsletters_owner ON sample_newsletters(user_id,saved_at);
 CREATE TABLE IF NOT EXISTS llm_requests (
  request_id TEXT PRIMARY KEY,
  user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -31,31 +23,24 @@ CREATE TABLE IF NOT EXISTS llm_requests (
 );
 CREATE INDEX IF NOT EXISTS llm_requests_user_step ON llm_requests(user_id,step,started_at);
 
--- Shared, URL-unique article content and topic-independent evaluation cache.
-CREATE TABLE IF NOT EXISTS articles (
+-- Daily collection is shared by reference newsletter; publication time is fixed at 08:00 KST.
+CREATE TABLE IF NOT EXISTS subscripted_articles (
  article_id TEXT PRIMARY KEY,
- domain_id TEXT REFERENCES domains(domain_id),
- url TEXT NOT NULL UNIQUE CHECK(length(trim(url))>0), title TEXT NOT NULL,
- published_at TEXT, content TEXT, highlights TEXT,
- image_url TEXT, collected_at TEXT NOT NULL,
+ sample_id TEXT NOT NULL REFERENCES sample_newsletters(sample_id) ON DELETE RESTRICT,
+ domain_id TEXT NOT NULL REFERENCES domains(domain_id),
  request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
+ url TEXT NOT NULL CHECK(length(trim(url))>0), title TEXT NOT NULL,
+ published_at TEXT, content TEXT, image_url TEXT, favicon_url TEXT, image_storage_path TEXT,
+ collected_at TEXT NOT NULL,
  technical_score REAL CHECK(technical_score BETWEEN 0 AND 100),
  organization_score REAL CHECK(organization_score BETWEEN 0 AND 100),
  impact_score REAL CHECK(impact_score BETWEEN 0 AND 100),
+ recency_score REAL CHECK(recency_score BETWEEN 0 AND 100),
  total_score REAL CHECK(total_score BETWEEN 0 AND 100),
- summary TEXT,
- scored_at TEXT, score_version TEXT
+ UNIQUE(sample_id,url)
 );
-CREATE INDEX IF NOT EXISTS articles_published ON articles(published_at);
-CREATE INDEX IF NOT EXISTS articles_request ON articles(request_id);
-
-CREATE TABLE IF NOT EXISTS subscripted_articles (
- subscription_id TEXT NOT NULL REFERENCES subscriptions(subscription_id) ON DELETE CASCADE,
- article_id TEXT NOT NULL REFERENCES articles(article_id) ON DELETE RESTRICT,
- request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
- PRIMARY KEY(subscription_id,article_id)
-);
-CREATE INDEX IF NOT EXISTS subscripted_articles_article ON subscripted_articles(article_id);
+CREATE INDEX IF NOT EXISTS subscripted_articles_period ON subscripted_articles(sample_id,published_at);
+CREATE INDEX IF NOT EXISTS subscripted_articles_collected ON subscripted_articles(sample_id,collected_at);
 
 CREATE TABLE IF NOT EXISTS subscriptions (
  subscription_id TEXT PRIMARY KEY,
@@ -105,12 +90,19 @@ CREATE INDEX IF NOT EXISTS sample_domains_request ON sample_domains(request_id);
 
 
 CREATE TABLE IF NOT EXISTS sample_articles (
+ article_id TEXT PRIMARY KEY,
  sample_id TEXT NOT NULL REFERENCES sample_newsletters(sample_id) ON DELETE CASCADE,
- article_id TEXT NOT NULL REFERENCES articles(article_id) ON DELETE RESTRICT,
+ domain_id TEXT REFERENCES domains(domain_id),
+ url TEXT NOT NULL, title TEXT NOT NULL, published_at TEXT, content TEXT, summary TEXT, highlights TEXT,
+ image_url TEXT, favicon_url TEXT, image_storage_path TEXT, collected_at TEXT NOT NULL,
  request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
- PRIMARY KEY(sample_id,article_id)
+ technical_score REAL CHECK(technical_score BETWEEN 0 AND 100),
+ organization_score REAL CHECK(organization_score BETWEEN 0 AND 100),
+ impact_score REAL CHECK(impact_score BETWEEN 0 AND 100),
+ recency_score REAL CHECK(recency_score BETWEEN 0 AND 100),
+ total_score REAL CHECK(total_score BETWEEN 0 AND 100),
+ UNIQUE(sample_id,url), UNIQUE(sample_id,article_id)
 );
-CREATE INDEX IF NOT EXISTS sample_articles_article ON sample_articles(article_id);
 CREATE TABLE IF NOT EXISTS sample_issues (
  issue_id TEXT PRIMARY KEY,
  sample_id TEXT NOT NULL REFERENCES sample_newsletters(sample_id) ON DELETE CASCADE,
@@ -126,12 +118,11 @@ CREATE INDEX IF NOT EXISTS sample_issues_rank ON sample_issues(sample_id,rank);
 CREATE TABLE IF NOT EXISTS subscripted_issues (
  issue_id TEXT PRIMARY KEY,
  subscription_id TEXT NOT NULL REFERENCES subscriptions(subscription_id) ON DELETE RESTRICT,
- article_id TEXT NOT NULL,
+ article_id TEXT NOT NULL REFERENCES subscripted_articles(article_id) ON DELETE RESTRICT,
  request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
  summary TEXT,
  rank INTEGER NOT NULL CHECK(rank>0),
- created_at TEXT NOT NULL,
- FOREIGN KEY(subscription_id,article_id) REFERENCES subscripted_articles(subscription_id,article_id) ON DELETE RESTRICT
+ created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS subscripted_issues_subscription ON subscripted_issues(subscription_id,created_at);
 CREATE INDEX IF NOT EXISTS subscripted_issues_article ON subscripted_issues(article_id);

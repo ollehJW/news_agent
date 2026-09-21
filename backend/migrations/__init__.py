@@ -1,0 +1,1 @@
+"""WiaNews migrations package."""

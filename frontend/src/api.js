@@ -7,7 +7,7 @@ function parseDomain(domain) {
   return { ...domain, host: normalizeDomain(domain.host), mark: domain.name.slice(0, 2) };
 }
 
-export async function streamRecommendedDomains(topic, signal, onDomain, sampleId) {
+export async function streamRecommendedDomains(topic, signal, onDomain, sampleId, onQuery=()=>{}, onQueries=()=>{}) {
   const response = await fetch('/api/domains/recommend/stream', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-WiaNews-Request': '1' },
     body: JSON.stringify({ topic, sample_id: sampleId }), signal,
@@ -30,6 +30,14 @@ export async function streamRecommendedDomains(topic, signal, onDomain, sampleId
     const data = JSON.parse(raw);
     if (type === 'error') throw new Error(data.message || '추천이 중단되었습니다. 다시 시도해 주세요.');
     if (type === 'done') { complete = true; return; }
+    if (type === 'query') {
+      if(typeof data.query !== 'string' || !data.query.trim())throw new Error('검색 쿼리 형식이 올바르지 않습니다.');
+      onQuery(data); return;
+    }
+    if (type === 'queries') {
+      if(!Array.isArray(data.queries)||data.queries.length>5||data.queries.some(q=>typeof q.query !== 'string'))throw new Error('검색 쿼리 형식이 올바르지 않습니다.');
+      onQueries(data.queries); return;
+    }
     if (type === 'domain') {
       const domain = parseDomain(data);
       if (seen.has(domain.host)) return;

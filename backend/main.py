@@ -3,16 +3,20 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
-from .auth import router as auth_router, init_db
-from .error_storage import tracked_member_user as member_user, ErrorRoute, record_sample_error
+from backend.core.auth import router as auth_router, init_db
+from backend.core.error_storage import tracked_member_user as member_user, ErrorRoute, record_sample_error
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
-from .domains import RecommendationRequest, RecommendationResponse, recommend_domains
-from .llm_client import ConfigurationError, InvalidLLMResponse
+from backend.recommendations.domains import RecommendationRequest, RecommendationResponse, recommend_domains
+from backend.recommendations.query_storage import QueryBatch, recommend_queries
+from backend.integrations.llm_client import ConfigurationError, InvalidLLMResponse
 
-from .streaming import router as streaming_router
-from .tracking import init_newsletter_db, sample_context
-from .workflows import router as workflow_router, prepare_recommendation, store_recommendation
+from backend.recommendations.streaming import router as streaming_router
+from backend.subscriptions.subscriptions import router as subscriptions_router
+from backend.recommendations.subject_validation import router as subject_validation_router
+from backend.samples.sample_collection import router as sample_collection_router
+from backend.core.tracking import init_newsletter_db, sample_context
+from backend.samples.workflows import router as workflow_router, prepare_recommendation, store_recommendation
 
 @asynccontextmanager
 async def lifespan(app):
@@ -25,6 +29,9 @@ app = FastAPI(title='WiaNews API', version='0.2.0', lifespan=lifespan)
 app.router.route_class = ErrorRoute
 app.include_router(auth_router)
 app.include_router(workflow_router)
+app.include_router(subscriptions_router)
+app.include_router(subject_validation_router)
+app.include_router(sample_collection_router)
 app.include_router(streaming_router, dependencies=[Depends(member_user)])
 
 
@@ -61,6 +68,9 @@ async def recommend(request: RecommendationRequest, user=Depends(member_user)):
         async with asyncio.timeout(125):
             result = await recommend_domains(request.topic)
             if sample_id:
+                query_batch = QueryBatch(queries=result.queries)
+                query_batch._request_id = result._request_id
+                result.query_recommendations = recommend_queries(sample_id, query_batch)
                 for rank, domain in enumerate(result.domains, 1):
                     store_recommendation(sample_id,batch,domain,rank)
                     count += 1

@@ -14,3 +14,27 @@
 .stream-progress{display:flex;align-items:center;gap:12px;padding:16px;background:#f0f5fb;border-radius:7px;color:#465a73}.stream-progress b{font-size:12px;font-weight:500}.stream-progress p{font-size:12px;margin-top:5px;color:#465a73}.stream-error{padding:4px 0 12px}
 
 .topic-panel{padding-bottom:25px}.source-panel{margin-top:20px;padding:24px}.source-panel .section-title{gap:10px;margin-bottom:18px}.source-panel .section-title .button{font-size:12px;padding:9px 10px}.source-panel h2{font-size:16px}.source-panel .count{font-size:14px;margin-left:4px}.managed-domains{max-height:390px;overflow:auto;border:1px solid #e2e9f2;border-radius:7px}.managed-domain{display:flex;align-items:flex-start;gap:12px;padding:15px;border-bottom:1px solid #edf1f6}.managed-domain:last-child{border-bottom:0}.managed-domain-copy{min-width:0;flex:1}.managed-domain-copy>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.managed-domain-copy strong{font-size:14px;font-weight:500;overflow-wrap:anywhere}.managed-domain-copy>a{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#465a73;margin:5px 0}.managed-domain-copy p{font-size:12px;color:#465a73;line-height:1.7}.source-empty{padding:31px 15px;text-align:center;color:#465a73;background:#fbfcfe}.source-empty h3{font-size:14px;font-weight:500;margin:11px 0 7px;color:#465a73}.source-empty p{font-size:12px;color:#465a73}.source-limit{font-size:12px;color:#465a73;margin-top:12px}.setup-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px}.setup-actions>span{font-size:12px;color:#465a73;line-height:1.8}.select-all{display:flex;align-items:center;gap:8px;color:#465a73;font-size:12px;cursor:pointer}.select-all input,.domain-checkbox{width:16px;height:16px;min-height:0;padding:0;margin:0;accent-color:#476d9c;cursor:pointer;flex-shrink:0}.domain-checkbox{margin-top:9px}.domain-card.selectable{transition:border-color .15s,background .15s}.domain-card.selectable.selected{border-color:#cdddef;background:#fcfdff}.registered-label{display:inline-flex;align-items:center;gap:3px;color:#465a73;font-size:12px;white-space:nowrap}.modal-footer>span.selection-limit-error{color:#ac5757}.period-panel{padding:28px;width:100%;min-width:0}.period-panel .period{width:100%}.period-panel .period-hint{margin-bottom:27px}
+
+.collection-settings-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+.collection-settings-grid>section{min-width:0}
+.collection-settings-grid>section>h3,.recommend-query-section>h3,.recommend-domain-title{display:flex;align-items:center;gap:8px;font-size:14px;color:#284665;margin:0 0 14px}
+.collection-query-list{list-style:none;padding:0;margin:0;display:grid;gap:9px}
+.collection-query-list li{display:flex;gap:10px;padding:13px;background:#f3f6fa;border:1px solid #e2e9f2;border-radius:7px;animation:query-arrive .2s ease-out}
+.collection-query-list li>span{font-size:11px;color:#637b96;font-weight:700;padding-top:3px}
+.collection-query-list li p{font-size:13px;line-height:1.7;margin:0;overflow-wrap:anywhere;color:#283f59}
+.collection-settings-grid .source-empty{border:1px solid #e2e9f2;border-radius:7px;padding:26px 12px}
+.collection-settings-grid .managed-domains .source-empty{border:0}
+.collection-settings-grid .managed-domain{gap:8px;padding:12px}
+.collection-settings-grid .domain-mark{width:28px;height:28px;font-size:12px}
+.collection-settings-grid .custom-domain input{min-width:0;width:100%}
+.recommend-query-section{padding-bottom:24px;margin-bottom:22px;border-bottom:1px solid #e2e9f2}
+.recommend-step{display:grid;place-items:center;width:25px;height:25px;background:#eaf0f7;border-radius:6px;font-size:11px;color:#426789}
+.recommend-domain-title .hint{margin:0 0 0 auto;font-weight:400}
+@keyframes query-arrive{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.collection-query-list li{animation:none}}
+
+.collection-query-list li p{flex:1;min-width:0}.collection-query-list .icon-button{align-self:center}.recommend-query-section .collection-query-list .domain-checkbox{margin-top:4px}
+
+.collection-stage-list{display:flex;justify-content:center;gap:18px;list-style:none;padding:0;margin:24px 0 0;font-size:12px;color:#78879a}.collection-stage-list li{display:flex;align-items:center;gap:6px}.collection-stage-list .active{color:#284665;font-weight:700}.collection-stage-list .done{color:#35634e}.collection-result-counts{font-size:12px;color:#53647b;margin:0 0 18px}
+
+.step-navigation-next{display:flex;align-items:center;justify-content:flex-end;gap:10px}

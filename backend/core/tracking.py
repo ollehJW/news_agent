@@ -1,18 +1,20 @@
 """Per-task run context is inherited by parallel domain-description tasks."""
+from backend.core.paths import BACKEND_DIR
 import os
 import sqlite3
 import uuid
 from contextvars import ContextVar
-from pathlib import Path
-from .auth import database, now
-from .sample_storage import migrate_run_domains
-from .sample_lifecycle import migrate_sample_newsletters
-from .subscription_newsletter_storage import migrate_subscription_newsletters, create_legacy_edition_tables, migrate_shared_newsletters
-from .article_storage import migrate_sample_articles
-from .subscription_article_storage import migrate_subscription_articles
-from .llm_tracking import migrate_llm_requests, step_name
+from backend.core.auth import database, now
+from backend.migrations.sample_storage import migrate_run_domains
+from backend.samples.sample_lifecycle import migrate_sample_newsletters
+from backend.migrations.subscription_newsletter_storage import migrate_subscription_newsletters, create_legacy_edition_tables, migrate_shared_newsletters
+from backend.migrations.legacy_sample_articles import migrate_sample_articles
+from backend.migrations.subscription_article_storage import migrate_subscription_articles
+from backend.core.llm_tracking import migrate_llm_requests, step_name
 
 sample_context = ContextVar('wianews_sample', default=None)
+llm_user_context = ContextVar('wianews_llm_user', default=None)
+subject_validation_context = ContextVar('wianews_subject_validation', default=None)
 
 
 def init_newsletter_db():
@@ -47,16 +49,23 @@ def init_newsletter_db():
         migrate_shared_newsletters(db)
         migrate_llm_requests(db)
         # Avoid executescript's implicit commit so schema and data migrate atomically.
+        legacy_articles = 'run_articles' in tables or any('url' in {r['name'] for r in db.execute(f'PRAGMA table_info({table})')} for table in ('sample_articles','subscripted_articles'))
+        old_sample='user_id' in {r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}
+        schema_path=BACKEND_DIR / ('migrations/legacy_articles.sql' if legacy_articles else 'migrations/pre_sample_runs.sql' if old_sample else 'newsletter_schema.sql')
         statement = ''
-        for line in Path(__file__).with_name('newsletter_schema.sql').read_text().splitlines(True):
+        for line in schema_path.read_text().splitlines(True):
             statement += line
             if sqlite3.complete_statement(statement):
                 db.execute(statement)
                 statement = ''
-        if 'status' not in {r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}:
+        if old_sample and 'status' not in {r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}:
             db.execute("ALTER TABLE sample_newsletters ADD COLUMN status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('draft','completed'))")
+        if legacy_articles and 'highlights' not in {r['name'] for r in db.execute('PRAGMA table_info(sample_articles)')}:
+            db.execute('ALTER TABLE sample_articles ADD COLUMN highlights TEXT')
+        from backend.migrations.article_scores import migrate_article_scores
+        if legacy_articles: migrate_article_scores(db)
         migrate_run_domains(db)
-        migrate_sample_articles(db)
+        if legacy_articles: migrate_sample_articles(db)
         if migrate_publications:
             create_legacy_edition_tables(db)
             # Only rows already used as publication results are also actual editions.
@@ -82,7 +91,7 @@ def init_newsletter_db():
             db.execute('CREATE INDEX IF NOT EXISTS subscriptions_reference ON subscriptions(sample_id,status)')
         migrate_subscription_newsletters(db)
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='newsletter_runs'").fetchone():
-            from .sample_lifecycle import legacy_current_sample
+            from backend.samples.sample_lifecycle import legacy_current_sample
             for run in db.execute('SELECT * FROM newsletter_runs').fetchall():
                 legacy_current_sample(db,run['run_id'])
                 if run['error_message']:
@@ -90,20 +99,37 @@ def init_newsletter_db():
                                (str(uuid.uuid4()),run['user_id'],{0:'sample_domain_recommendation',1:'sample_article_collection',2:'sample_issue_selection',3:'sample_newsletter_generation'}.get(run['current_step'],'sample_creation'),'LegacyRunError',run['error_message'],run['updated_at']))
             db.execute('DROP TABLE newsletter_runs')
         db.execute('DROP TABLE IF EXISTS usage_events')
+        if legacy_articles:
+            from backend.migrations.shared_articles import migrate_shared_articles
+            migrate_shared_articles(db)
+        from backend.migrations.remove_recency import remove_recency
+        remove_recency(db)
+        from backend.migrations.sample_runs import migrate_sample_runs
+        migrate_sample_runs(db)
+        from backend.migrations.compact_articles import compact_articles
+        compact_articles(db)
+        sample_columns={r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}
+        if 'total_summary' not in sample_columns:db.execute('ALTER TABLE sample_newsletters ADD COLUMN total_summary TEXT')
+        if 'request_id' not in sample_columns:db.execute('ALTER TABLE sample_newsletters ADD COLUMN request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL')
         if db.execute('PRAGMA foreign_key_check').fetchall():
             raise RuntimeError('Newsletter migration violated foreign key constraints')
 
 
 def start_attempt(operation):
     sample_id = sample_context.get()
-    if not sample_id:
+    user_id = llm_user_context.get()
+    if not sample_id and not user_id:
         return None
     request_id = str(uuid.uuid4())
     with database() as db:
-        user_id = db.execute('SELECT user_id FROM sample_newsletters WHERE sample_id=?',(sample_id,)).fetchone()[0]
+        if user_id is None:
+            user_id = db.execute('SELECT user_id FROM sample_details WHERE sample_id=?',(sample_id,)).fetchone()[0]
         db.execute('''INSERT INTO llm_requests
             (request_id,user_id,step,provider,model,started_at) VALUES (?,?,?,?,?,?)''',
             (request_id,user_id,step_name(operation),'azure_openai',os.getenv('OPENAI_MODEL',''),now()))
+        validation_id=subject_validation_context.get()
+        if validation_id:
+            db.execute('UPDATE subject_validation SET request_id=? WHERE validation_id=? AND user_id=?',(request_id,validation_id,user_id))
     return request_id
 
 
@@ -120,7 +146,7 @@ def finish_attempt(request_id, status, duration_ms, response=None, error=None):
              duration_ms, now(), request_id))
 
     if status == 'failed' and error is not None:
-        from .error_storage import record_error
+        from backend.core.error_storage import record_error
         with database() as db:
             row=db.execute('SELECT user_id,step FROM llm_requests WHERE request_id=?',(request_id,)).fetchone()
         if row:

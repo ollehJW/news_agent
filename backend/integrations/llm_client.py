@@ -3,14 +3,14 @@ import asyncio
 import logging
 import os
 import time
-from .tracking import start_attempt, finish_attempt
-from pathlib import Path
+from backend.core.tracking import start_attempt, finish_attempt
+from backend.core.paths import PROJECT_DIR
 
 import httpx
 from dotenv import load_dotenv
 from openai import AsyncAzureOpenAI, APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
-load_dotenv(Path(__file__).resolve().parents[1] / '.env', override=False)
+load_dotenv(PROJECT_DIR / '.env', override=False)
 log = logging.getLogger(__name__)
 
 
@@ -58,7 +58,7 @@ def retry_delay(exc):
         return 1
 
 
-async def chat_completion(messages, schema, max_tokens=16000, operation="domain_recommendation"):
+async def chat_completion(messages, schema, max_tokens=16000, operation="domain_recommendation", schema_name="domain_recommendations"):
     for attempt in range(2):
         started = time.monotonic()
         request_id = start_attempt(operation)
@@ -68,7 +68,7 @@ async def chat_completion(messages, schema, max_tokens=16000, operation="domain_
                 response = await client.chat.completions.create(
                     model=os.environ['OPENAI_MODEL'], messages=messages,
                     response_format={'type': 'json_schema', 'json_schema': {
-                        'name': 'domain_recommendations', 'strict': True, 'schema': schema}},
+                        'name': schema_name, 'strict': True, 'schema': schema}},
                     max_completion_tokens=max_tokens,
                 )
             if not response.choices:
@@ -83,8 +83,53 @@ async def chat_completion(messages, schema, max_tokens=16000, operation="domain_
             raise
         except Exception as exc:
             finish_attempt(request_id, 'failed', round((time.monotonic()-started)*1000), response, exc)
-            log.warning('domain_recommendation failed attempt=%s type=%s status=%s',
-                        attempt + 1, type(exc).__name__, getattr(exc, 'status_code', None))
+            log.warning('%s failed attempt=%s type=%s status=%s',
+                        operation, attempt + 1, type(exc).__name__, getattr(exc, 'status_code', None))
             if attempt == 1 or not retryable(exc):
                 raise
             await asyncio.sleep(retry_delay(exc))
+
+
+async def stream_chat_completion(messages, schema, max_tokens=4000, operation="domain_shortlist"):
+    """Yield live deltas, then a validated completion carrying its tracked request ID."""
+    started = time.monotonic()
+    request_id = start_attempt(operation)
+    response = None
+    text = ''
+    finish_reason = None
+    try:
+        async with create_llm_client() as client:
+            stream = await client.chat.completions.create(
+                model=os.environ['OPENAI_MODEL'], messages=messages,
+                response_format={'type':'json_schema','json_schema':{
+                    'name':'domain_recommendations','strict':True,'schema':schema}},
+                max_completion_tokens=max_tokens, stream=True,
+                stream_options={'include_usage':True},
+            )
+            async with stream:
+                async for chunk in stream:
+                    if getattr(chunk, 'usage', None) is not None:
+                        response = chunk
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    if getattr(choice.delta, 'refusal', None):
+                        raise InvalidLLMResponse('Refused response')
+                    if choice.finish_reason is not None:
+                        finish_reason = choice.finish_reason
+                    delta = choice.delta.content or ''
+                    if delta:
+                        text += delta
+                        if len(text)>100000:
+                            raise InvalidLLMResponse('Response too large')
+                        yield delta
+        if finish_reason != 'stop' or not text:
+            raise InvalidLLMResponse('Incomplete response')
+        finish_attempt(request_id,'success',round((time.monotonic()-started)*1000),response)
+    except (asyncio.CancelledError, GeneratorExit) as exc:
+        finish_attempt(request_id,'cancelled',round((time.monotonic()-started)*1000),response,exc)
+        raise
+    except Exception as exc:
+        finish_attempt(request_id,'failed',round((time.monotonic()-started)*1000),response,exc)
+        raise
+    yield CompletionText(text,request_id)
