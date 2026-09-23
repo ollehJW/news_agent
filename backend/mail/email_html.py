@@ -1,8 +1,7 @@
 """Re-render stored WiaNews HTML as an inline-styled, table-based email."""
 from html.parser import HTMLParser
-from pathlib import Path
 from urllib.parse import urlsplit
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from backend.news.newsletter_rendering import render_document
 
 
 class Node:
@@ -65,8 +64,33 @@ def first_text(node,tag):
     return matches[0].text().strip() if matches else ''
 
 
-def email_html(html,image_sources=None):
+def article_nodes(root):
+    marked=[node for node in root.walk() if 'data-newsletter-article' in node.attrs]
+    return marked or root.find('article')
+
+
+def field(node,name):
+    return next((child for child in node.walk() if child.attrs.get('data-newsletter-field')==name),None)
+
+
+def field_text(node,name):
+    value=field(node,name)
+    return value.text().strip() if value else ''
+
+
+def newsletter_data(html):
     root=Document(html).root
+    if any(node.attrs.get('data-newsletter-version') for node in root.walk()):
+        articles=[]
+        for article in article_nodes(root):
+            images=article.find('img');image=safe_url(images[0].attrs.get('src')) if images else ''
+            source=field(article,'source')
+            articles.append({'title':field_text(article,'article-title'),'summary':field_text(article,'summary'),
+                'image':image,'image_link':image,'image_alt':images[0].attrs.get('alt','') if images else '',
+                'url':safe_url(source.attrs.get('href')) if source else '', 'date':field_text(article,'article-date')})
+        return {'title':field_text(root,'title') or first_text(root,'title'),'dates':field_text(root,'dates'),
+            'highlights':[node.text().strip() for node in root.walk() if node.attrs.get('data-newsletter-field')=='highlight'],
+            'articles':articles,'fallback':[node.text().strip() for node in root.walk() if node.attrs.get('data-newsletter-field')=='fallback']}
     header=root.find('header')
     dates=first_text(header[0],'span').lstrip('/ \u00a0') if header else ''
     highlights=[]
@@ -81,13 +105,20 @@ def email_html(html,image_sources=None):
         images=article.find('img')
         source=next((a for a in article.find('a') if a.find('svg') or '출처' in a.attrs.get('title','')),None)
         original_image=safe_url(images[0].attrs.get('src')) if images else ''
-        articles.append({'title':first_text(article,'h2'), 'tag':paragraphs[0].text().strip() if paragraphs else '',
-            'summary':summary, 'image':image_sources.get(original_image,'') if image_sources is not None else original_image,
+        articles.append({'title':first_text(article,'h2'),
+            'summary':summary, 'image':original_image,
             'image_link':original_image,
             'image_alt':images[0].attrs.get('alt','') if images else '',
             'url':safe_url(source.attrs.get('href')) if source else '',
-            'date':paragraphs[-1].text().strip() if paragraphs else ''})
-    env=Environment(loader=FileSystemLoader(Path(__file__).parent),autoescape=select_autoescape(['html']))
-    return env.get_template('newsletter_email.html').render(title=first_text(root,'h1') or first_text(root,'title') or 'WiaNews',
-        dates=dates,highlights=highlights,articles=articles,
-        fallback=[p.text().strip() for p in root.find('p')] if not articles else [])
+            'date':paragraphs[-1].text().strip().replace('-','.') if paragraphs else ''})
+    return {'title':first_text(root,'h1') or first_text(root,'title') or 'WiaNews',
+        'dates':dates,'highlights':highlights,'articles':articles,
+        'fallback':[p.text().strip() for p in root.find('p')] if not articles else []}
+
+
+def email_html(html,image_sources=None):
+    data=newsletter_data(html)
+    if image_sources is not None:
+        for article in data['articles']:
+            article['image']=image_sources.get(article['image'],'')
+    return render_document(**data)

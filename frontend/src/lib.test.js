@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeDomain, collectDemo, rankNews, newsletterHTML } from './lib.js';
+import { normalizeDomain, collectDemo, rankNews, escapeHTML } from './lib.js';
 test('domain normalization accepts public hosts and rejects unsafe inputs',()=>{
   assert.equal(normalizeDomain('https://www.Example.com/blog'),'example.com');
   for(const value of ['javascript:alert(1)','https://user:pass@example.com','localhost','https://example.com:8080','bad host.com','-bad.com']) assert.throws(()=>normalizeDomain(value));
@@ -14,7 +14,7 @@ test('collection honors selected hosts and ranking removes duplicates before sel
   assert.ok(ranked.every((n,i)=>n.score>=70&&(i===0||ranked[i-1].score>=n.score)));
   assert.equal(rankNews([{...data[0],scores:[0,0,0,0]}]).length,0);
 });
-test('export escapes user text',()=>{
-  const html=newsletterHTML({title:'<script>alert(1)</script>',topic:'<img>',dates:{start:'a',end:'b'},issues:[]});
+test('HTML escaping preserves text without executable markup',()=>{
+  const html=escapeHTML('<script>alert(1)</script><img>');
   assert.ok(!html.includes('<script>'));assert.ok(html.includes('&lt;script&gt;'));assert.ok(html.includes('&lt;img&gt;'));
 });

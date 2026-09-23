@@ -1,4 +1,4 @@
-"""Shared article scoring for sample and future subscription pipelines."""
+"""Shared article scoring for sample and subscription pipelines."""
 import json
 import asyncio
 from contextlib import AsyncExitStack

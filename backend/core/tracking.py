@@ -14,6 +14,7 @@ from backend.core.llm_tracking import migrate_llm_requests, step_name
 
 sample_context = ContextVar('wianews_sample', default=None)
 llm_user_context = ContextVar('wianews_llm_user', default=None)
+subscription_collection_context = ContextVar('wianews_subscription_collection', default=None)
 subject_validation_context = ContextVar('wianews_subject_validation', default=None)
 
 
@@ -115,6 +116,8 @@ def init_newsletter_db():
         sample_columns={r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}
         if 'total_summary' not in sample_columns:db.execute('ALTER TABLE sample_newsletters ADD COLUMN total_summary TEXT')
         if 'request_id' not in sample_columns:db.execute('ALTER TABLE sample_newsletters ADD COLUMN request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL')
+        from backend.migrations.subscription_collection import migrate_subscription_collection
+        migrate_subscription_collection(db)
         if db.execute('PRAGMA foreign_key_check').fetchall():
             raise RuntimeError('Newsletter migration violated foreign key constraints')
 
@@ -131,6 +134,9 @@ def start_attempt(operation):
         db.execute('''INSERT INTO llm_requests
             (request_id,user_id,step,provider,model,started_at) VALUES (?,?,?,?,?,?)''',
             (request_id,user_id,step_name(operation),'azure_openai',os.getenv('OPENAI_MODEL',''),now()))
+        collection=subscription_collection_context.get()
+        if collection:
+            db.execute("UPDATE subscription_collection_runs SET request_id=? WHERE run_id=? AND attempt_token=? AND status='running'",(request_id,*collection))
         validation_id=subject_validation_context.get()
         if validation_id:
             db.execute('UPDATE subject_validation SET request_id=? WHERE validation_id=? AND user_id=?',(request_id,validation_id,user_id))

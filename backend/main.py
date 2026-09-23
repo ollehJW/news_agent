@@ -14,6 +14,8 @@ from backend.integrations.llm_client import ConfigurationError, InvalidLLMRespon
 
 from backend.recommendations.streaming import router as streaming_router
 from backend.subscriptions.subscriptions import router as subscriptions_router
+from backend.subscriptions.collection import router as collection_router
+from backend.subscriptions.scheduler import start_scheduler
 from backend.recommendations.subject_validation import router as subject_validation_router
 from backend.samples.sample_collection import router as sample_collection_router
 from backend.core.tracking import init_newsletter_db, sample_context
@@ -24,7 +26,13 @@ async def lifespan(app):
     init_db()
     init_newsletter_db()
     init_mail_db()
-    yield
+    scheduler=start_scheduler()
+    try:
+        yield
+    finally:
+        if scheduler:
+            scheduler.cancel()
+            await asyncio.gather(scheduler,return_exceptions=True)
 
 
 app = FastAPI(title='WiaNews API', version='0.2.0', lifespan=lifespan)
@@ -33,6 +41,7 @@ app.include_router(auth_router)
 app.include_router(mail_router)
 app.include_router(workflow_router)
 app.include_router(subscriptions_router)
+app.include_router(collection_router)
 app.include_router(subject_validation_router)
 app.include_router(sample_collection_router)
 app.include_router(streaming_router, dependencies=[Depends(member_user)])

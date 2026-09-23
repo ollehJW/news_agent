@@ -33,7 +33,11 @@ export default function RecipientSearchDialog({newsletter,onClose}) {
   const results=users.filter(u=>(u.team_name||'').includes(filter.team)&&((u.full_name||'').startsWith(filter.name)||u.employee_id.startsWith(filter.name)));
   const selected=new Set(chosen.map(u=>u.user_id));
   const available=results.filter(u=>u.email&&!selected.has(u.user_id));
-  const add=people=>setChosen(current=>{const ids=new Set(current.map(u=>u.user_id));return [...current,...people.filter(u=>!ids.has(u.user_id))];});
+  const add=people=>{
+    const additions=people.filter(u=>!selected.has(u.user_id));
+    if(chosen.length+additions.length>100){setError('한 번에 최대 100명까지 선택할 수 있습니다.');return;}
+    setChosen(current=>[...current,...additions]);setError('');
+  };
   const person=u=><div className="rs-person-text"><b>{u.full_name}<span>{u.role_name}</span></b><small>{u.team_name} · {u.employee_id}</small><small>{u.email||'이메일 미등록'}</small></div>;
   return createPortal(<dialog ref={dialog} className="rs-dialog" aria-labelledby="rs-title" onCancel={e=>{e.preventDefault();close();}}>
     <header className="rs-header"><div className="rs-title-icon"><Mail size={24}/></div><div><h2 id="rs-title">이메일 수신자 검색</h2><p><strong>{newsletter.title}</strong> · 수신자를 검색하고 선택하세요.</p></div><button className="rs-icon" onClick={close} disabled={sending} aria-label="검색 닫기"><X size={20}/></button></header>
@@ -50,6 +54,6 @@ export default function RecipientSearchDialog({newsletter,onClose}) {
       <section className="rs-selected" aria-label="선택한 수신자"><div className="rs-panel-heading"><h3>선택한 수신자 <span>{chosen.length}</span></h3><button className="rs-link" disabled={locked||!chosen.length} onClick={()=>setChosen([])}>전체 비우기</button></div><div className="rs-list">{!chosen.length?<div className="rs-empty"><UsersRound size={30}/><p>왼쪽에서 수신자를 담아 주세요.</p></div>:chosen.map(u=><div className="rs-person" key={u.user_id}>{person(u)}<button className="rs-icon" disabled={locked} aria-label={`${u.full_name} ${u.employee_id} 선택 취소`} onClick={()=>setChosen(current=>current.filter(p=>p.user_id!==u.user_id))}><X size={16}/></button></div>)}</div></section>
     </div>
     {delivery&&<div className="rs-delivery-result" role="status"><strong>발송 완료 {delivery.results.filter(r=>r.status==='sent').length}명</strong>{delivery.results.some(r=>r.status!=='sent')&&<><p>실패 {delivery.results.filter(r=>r.status==='failed').length}명 · 결과 확인 필요 {delivery.results.filter(r=>r.status==='unknown').length}명</p>{delivery.results.filter(r=>r.status!=='sent').map(r=><p key={r.user_id}>{r.name} · {r.status==='failed'?'발송 실패':'수신 여부를 확인해 주세요. 중복 방지를 위해 자동 재발송하지 않습니다.'}</p>)}</>}</div>}
-    <footer className="rs-footer"><span>선택한 수신자 <b aria-live="polite">{chosen.length}명</b>{sending&&<span role="status"> · 메일 발송 중…</span>}</span><button className="rs-secondary" onClick={close} disabled={sending}>닫기</button><button className="rs-primary" onClick={send} disabled={sending||loading||!chosen.length||Boolean(delivery)}><Mail size={16}/>{sending?'발송 중…':delivery?'발송 처리 완료':locked?'발송 결과 확인':'메일 보내기'}</button></footer>
+    <footer className="rs-footer"><span>선택한 수신자 <b aria-live="polite">{chosen.length} / 100명</b> · 한 통으로 발송{sending&&<span role="status"> · 메일 발송 중…</span>}</span><button className="rs-secondary" onClick={close} disabled={sending}>닫기</button><button className="rs-primary" onClick={send} disabled={sending||loading||!chosen.length||Boolean(delivery)}><Mail size={16}/>{sending?'발송 중…':delivery?'발송 처리 완료':locked?'발송 결과 확인':'메일 보내기'}</button></footer>
   </dialog>,document.body);
 }

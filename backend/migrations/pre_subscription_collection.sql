@@ -50,12 +50,10 @@ CREATE INDEX IF NOT EXISTS articles_published ON articles(published_at);
 CREATE INDEX IF NOT EXISTS articles_request ON articles(request_id);
 
 CREATE TABLE IF NOT EXISTS subscripted_articles (
- sample_id TEXT NOT NULL REFERENCES sample_newsletters(sample_id) ON DELETE CASCADE,
+ subscription_id TEXT NOT NULL REFERENCES subscriptions(subscription_id) ON DELETE CASCADE,
  article_id TEXT NOT NULL REFERENCES articles(article_id) ON DELETE RESTRICT,
  request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
- run_id TEXT REFERENCES subscription_collection_runs(run_id) ON DELETE SET NULL,
- collected_at TEXT NOT NULL,
- PRIMARY KEY(sample_id,article_id)
+ PRIMARY KEY(subscription_id,article_id)
 );
 CREATE INDEX IF NOT EXISTS subscripted_articles_article ON subscripted_articles(article_id);
 
@@ -133,7 +131,7 @@ CREATE TABLE IF NOT EXISTS subscripted_issues (
  summary TEXT,
  rank INTEGER NOT NULL CHECK(rank>0),
  created_at TEXT NOT NULL,
- FOREIGN KEY(article_id) REFERENCES articles(article_id) ON DELETE RESTRICT
+ FOREIGN KEY(subscription_id,article_id) REFERENCES subscripted_articles(subscription_id,article_id) ON DELETE RESTRICT
 );
 CREATE INDEX IF NOT EXISTS subscripted_issues_subscription ON subscripted_issues(subscription_id,created_at);
 CREATE INDEX IF NOT EXISTS subscripted_issues_article ON subscripted_issues(article_id);

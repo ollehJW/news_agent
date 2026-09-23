@@ -181,15 +181,15 @@ API 변경 요청에는 `X-WiaNews-Request: 1` 헤더가 필요합니다. 브라
 - `/api/llm-requests`에서 로그인한 사용자 본인의 호출 기록과 사용량 합계를 조회합니다. 공급자가 사용량을 보내지 않은 실패·취소 호출의 토큰은 NULL이며 추정하지 않습니다. 합계는 확인된 사용량만 더합니다.
 - Exa `results[].image`는 `image_url`, `favicon`은 `favicon_url`에 대응합니다. `image_storage_path`는 향후 이미지 파일 저장용으로 준비했습니다. 현재 Exa 수집·이미지 다운로드는 구현하지 않았습니다.
 - 샘플 수집은 Exa와 LLM을 사용하며 `data_mode=live`로 반환합니다. 주제·중복 통합 전처리와 스코어링 호출은 llm_requests에 기록됩니다.
-- 기존 브라우저 보관함 데이터는 자동 이관하지 않습니다. 구독 추가·조회·수정·상태 변경은 DB에 연결되어 있으며 자동 수집·발송은 아직 없습니다.
+- 기존 브라우저 보관함 데이터는 자동 이관하지 않습니다. 구독 추가·조회·수정·상태 변경은 DB에 연결되어 있으며 매일 구독 기사 수집은 연결되어 있으며, 구독 자동 발행·발송은 아직 연결하지 않았습니다.
 - 기존 `roles.code`는 시작 시 제거하며 직급 ID와 사용자 연결, 비밀번호, 관리자 권한을 유지합니다.
 
 
 ## 구독 데이터베이스
 
-다음 구독 테이블은 서버 시작 시 생성됩니다. 구독 화면은 DB 저장·조회 API를 사용합니다. 기존 localStorage 설정은 자동 이관하지 않습니다. 매일 수집·자동 발행은 아직 구현하지 않았습니다.
+다음 구독 테이블은 서버 시작 시 생성됩니다. 구독 화면은 DB 저장·조회 API를 사용합니다. 기존 localStorage 설정은 자동 이관하지 않습니다. 매일 수집은 구현되었고 자동 발행은 아직 연결하지 않았습니다.
 
-- `subscripted_articles`: 기준 뉴스레터별 누적 기사. `(sample_id, url)`로 중복을 방지하며 원문 발행일·수집 시각과 이미지 정보를 저장합니다. 발행일을 알 수 없으면 NULL로 유지합니다.
+- `subscripted_articles`: 샘플별 전처리 통과 기사 연결. `(sample_id, article_id)`로 중복을 방지하고 수집 실행·LLM 요청·추가 시각을 기록합니다. 원문 정보는 URL이 고유한 `articles`에 저장합니다.
 - `subscriptions`: 샘플별 사용자 구독 관계. `subscription_id`, `sample_id`, `user_id`, `status`, `created_at`, `updated_at`을 저장합니다. `(sample_id, user_id)`는 유일하며 상태는 active/paused/cancelled입니다. 기존 newsletter_subscriptions의 구독 관계와 상태·시각을 이관하고 발행 설정 컬럼은 제거합니다.
 - `subscripted_issues`: 사용자별 구독에서 자동 선정된 기사와 요약·점수·LLM 요청 참조.
 - `subscripted_newsletters`: 샘플·수집 기간별 공유 발행본. `newsletter_id`, `sample_id`, `coverage_start_date`, `coverage_end_date`, `issue_ids`, `summary`, `request_id`, `html_content`, `created_at`, `published_at`을 저장합니다. issue_ids 배열 순서가 표시 순서이며, 샘플·커버 기간 조합은 고유합니다. summary는 이번 호 핵심 요약, request_id는 그 요약 생성 호출입니다. 아직 발행 전이면 published_at은 NULL입니다. JSON 내 이슈의 존재·중복·원문 기사의 해당 샘플 소속은 향후 발행 API에서 검증해야 합니다. 이슈의 subscription_id는 생성 출처를 나타내며, 발행본을 받는 구독은 subscription_history로 관리합니다. 요약 LLM 호출 단계는 `subscription_newsletter_summary`로 구분할 예정입니다.
@@ -245,7 +245,7 @@ API 변경 요청에는 `X-WiaNews-Request: 1` 헤더가 필요합니다. 브라
 
 ### 구독 원본 기사
 
-`subscripted_articles`는 `article_id`, `sample_id`, `domain_id`, `request_id`, `url`, `title`, `published_at`, `content`, `image_url`, `favicon_url`, `image_storage_path`, `collected_at`으로 구성합니다. 요약·점수·선정 여부는 저장하지 않습니다. URL은 수집 코드에서 정규화한 뒤 저장해야 하며 `(sample_id,url)` 고유 제약으로 중복 삽입을 막습니다.
+`subscripted_articles`는 `sample_id`, `article_id`, `request_id`, `run_id`, `collected_at`으로 구성합니다. 매일 오전 5시(KST)에 샘플별 공유 수집을 실행하며, 원문과 이미지 정보는 `articles`를 재사용합니다. 자세한 동작 및 수동 실행 API는 [backend/README.md](backend/README.md#daily-subscription-collection)를 참고하세요.
 
 최근 7일 비교는 `collected_at`, 발행 커버 기간 후보 조회는 `published_at`을 기준으로 합니다. 두 날짜에 각각 sample_id와의 복합 인덱스를 제공합니다. 중복 판정 호출은 `llm_requests.request_id`를 참조하며 향후 step은 `subscription_article_deduplication`을 사용합니다. 과거 기사에는 대응하는 호출이 없어 request_id를 NULL로 이관합니다. 기존 canonical_url을 url로 사용하고 도메인은 해당 URL 호스트에서 연결합니다.
 

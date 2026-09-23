@@ -54,6 +54,8 @@ def request_step(path):
         return 'newsletter_email_send'
     if path.startswith('/api/subject-validations'):
         return 'sample_subject_validation'
+    if path.startswith('/api/subscriptions') and path.rsplit('/',1)[-1] in ('collect','collections'):
+        return 'subscription_article_collection'
     if path.startswith('/api/subscriptions'):
         return {'settings':'subscription_settings','status':'subscription_status','marketplace':'subscription_marketplace','preview':'subscription_newsletter_preview'}.get(path.rsplit('/',1)[-1],'subscription_management')
     if '/domains/recommend' in path:

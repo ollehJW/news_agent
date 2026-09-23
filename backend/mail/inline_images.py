@@ -2,7 +2,7 @@
 import hashlib
 from backend.core.auth import database
 from backend.news.image_storage import ensure_article_image,read_stored_image
-from backend.mail.email_html import Document
+from backend.mail.email_html import Document,article_nodes
 
 
 def prepare_inline_images(html):
@@ -10,7 +10,7 @@ def prepare_inline_images(html):
     attachments=[]
     total=0
     root=Document(html).root
-    urls=dict.fromkeys(image.attrs.get('src','') for article in root.find('article') for image in article.find('img'))
+    urls=dict.fromkeys(image.attrs.get('src','') for article in article_nodes(root) for image in article.find('img'))
     for url in urls:
         sources[url]=''
         with database() as db:

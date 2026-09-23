@@ -80,10 +80,11 @@ def mail_tls_context():
     return context
 
 
-def deliver(sender,password,recipient,title,html,*,prepared=None):
+def deliver(sender,password,recipients,title,html,*,prepared=None):
+    recipients=list(dict.fromkeys(address.strip().casefold() for address in recipients))
     message=EmailMessage()
     message['From']=formataddr(('WiaNews',sender))
-    message['To']=recipient
+    message['To']=', '.join(recipients)
     message['Subject']='[WiaNews] '+' '.join(title.split())
     message['Date']=formatdate(localtime=False)
     message['Message-ID']=make_msgid(domain=sender.split('@')[-1])
@@ -94,7 +95,7 @@ def deliver(sender,password,recipient,title,html,*,prepared=None):
     for image in attachments:
         html_part.add_related(image['data'],maintype='image',subtype='jpeg',
             cid='<'+image['cid']+'>',filename=image['filename'],disposition='inline')
-    # Each recipient gets a separate message, without exposing other recipients.
+    # Submit one MIME message with all selected addresses in To and SMTP RCPT TO.
     stage='connect'
     smtp=None
     try:
@@ -106,13 +107,14 @@ def deliver(sender,password,recipient,title,html,*,prepared=None):
         code,reply=smtp.docmd('AUTH','PLAIN '+token)
         if code!=235:raise smtplib.SMTPAuthenticationError(code,reply)
         stage='send'
-        refused=smtp.send_message(message,from_addr=sender,to_addrs=[recipient])
-        return 'failed' if refused else 'sent'
+        refused=smtp.send_message(message,from_addr=sender,to_addrs=recipients)
+        rejected={address.casefold() for address in refused}
+        return {address:('failed' if address in rejected else 'sent') for address in recipients}
     except (smtplib.SMTPAuthenticationError,smtplib.SMTPRecipientsRefused,smtplib.SMTPSenderRefused,smtplib.SMTPDataError):
-        return 'failed'
+        return {address:'failed' for address in recipients}
     except (OSError,smtplib.SMTPException):
         # An interrupted DATA response may already have been accepted; never retry automatically.
-        return 'unknown' if stage=='send' else 'failed'
+        return {address:('unknown' if stage=='send' else 'failed') for address in recipients}
     finally:
         if smtp:
             try:smtp.close()
@@ -147,20 +149,18 @@ def send_newsletter(body: SendBody,user=Depends(tracked_member_user)):
              '[WiaNews] '+' '.join(letter['title'].split()),sender,
              json.dumps(mailing_list,ensure_ascii=False),'processing',now()))
     prepared=prepare_inline_images(letter['html_content'])
-    results=[]
-    addresses={}
-    for recipient in recipients:
-        address=recipient['email'].strip()
-        key=address.casefold()
-        if key not in addresses:
-            status=deliver(sender,password,address,letter['title'],letter['html_content'],prepared=prepared)
-            addresses[key]={'status':status,'sent_at':now() if status=='sent' else None,'completed_at':now()}
-        results.append({'user_id':recipient['user_id'],'name':recipient['full_name'],'email':address,**addresses[key]})
-        with database() as db:
-            db.execute('UPDATE mailing SET results_json=?,sent_at=? WHERE user_id=? AND request_id=?',
-                (json.dumps(results,ensure_ascii=False),max((r['sent_at'] for r in results if r['sent_at']),default=None),user['user_id'],body.request_id))
+    addresses=list(dict.fromkeys(r['email'].strip().casefold() for r in recipients))
+    statuses=deliver(sender,password,addresses,letter['title'],letter['html_content'],prepared=prepared)
+    completed_at=now()
+    results=[{'user_id':r['user_id'],'name':r['full_name'],'email':r['email'].strip(),
+        'status':statuses[r['email'].strip().casefold()],
+        'sent_at':completed_at if statuses[r['email'].strip().casefold()]=='sent' else None,
+        'completed_at':completed_at} for r in recipients]
     with database() as db:
-        db.execute("UPDATE mailing SET status='completed',completed_at=? WHERE user_id=? AND request_id=?",(now(),user['user_id'],body.request_id))
+        db.execute("""UPDATE mailing SET results_json=?,sent_at=?,status='completed',completed_at=?
+            WHERE user_id=? AND request_id=?""",
+            (json.dumps(results,ensure_ascii=False),completed_at if any(r['status']=='sent' for r in results) else None,
+             completed_at,user['user_id'],body.request_id))
     return {'mailing_id':mailing_id,'results':results}
 
 

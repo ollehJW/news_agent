@@ -7,7 +7,7 @@ from backend.news.scoring_rules import SCORE_VERSION,weighted_scores
 
 
 def migrate_shared_articles(db):
-    schema=(BACKEND_DIR/'newsletter_schema.sql').read_text()
+    schema=(BACKEND_DIR/'migrations/pre_subscription_collection.sql').read_text()
     def create(table, replacement=False):
         start=schema.index(f'CREATE TABLE IF NOT EXISTS {table} (')
         ddl=schema[start:schema.index(';',start)+1]

@@ -20,7 +20,7 @@
 
 `samples/sample_collection.py` → `integrations/exa_search.py` → `samples/sample_preprocessing.py` → `news/news_scoring.py` → 샘플 기사·이슈 저장.
 
-구독 버전도 수집·스코어링 모듈을 공유하며, 과거 기사와의 중복 비교 등은 향후 구독 전처리 모듈로 추가합니다.
+구독 버전은 Exa 수집 모듈을 공유하고, 최근 7일간의 세부 주제 중복 비교는 별도 구독 전처리 모듈에서 수행합니다. 구독 수집 후 공통 평가 모듈로 미평가 기사를 평가합니다.
 
 `core/paths.py`에서 프로젝트·백엔드 기준 경로를 관리합니다. `.env`는 프로젝트 루트, DB·SQL 스키마·템플릿은 기존 backend 경로를 사용합니다.
 
@@ -30,14 +30,14 @@
 
 - `articles`: 정규화 URL을 UNIQUE 키로 기사 정보, highlights, 요약, 점수 4종을 한 번 저장합니다. `request_id`는 평가 LLM 호출입니다. `score_version`, `scored_at`는 평가 버전과 평가 시간을 기록합니다.
 - `sample_articles(sample_id, article_id, request_id)`: 전처리를 통과한 기사 연결입니다. `request_id`는 해당 수집의 주제·중복 전처리 호출입니다.
-- `subscripted_articles(subscription_id, article_id, request_id)`: 구독별 전처리 통과 기사 연결입니다. 동일 기사에 여러 구독을 연결할 수 있습니다.
+- `subscripted_articles(sample_id, article_id, request_id, run_id, collected_at)`: 같은 샘플을 구독하는 사용자들이 공유하는 전처리 통과 기사 연결입니다. collected_at은 해당 샘플에 추가한 시각입니다.
 - `sample_issues`, `subscripted_issues`: 레터에 선택한 기사와 `rank`만 관리하며 점수는 기사에서 읽습니다. 샘플의 기본 선택은 상위 5개입니다.
 - URL이 같고 평가 버전·기본 점수 3종·요약이 유효하면 평가 LLM을 생략합니다. 주제는 평가 입력에서 제외하며 주제 적합성·중복 전처리는 수집마다 실행합니다. 전처리 탈락 기사는 이번 샘플에 연결하지 않습니다.
 - 총점은 기술적 중요성 40%, 기술 주체 경쟁력 30%, 파급력 30%를 합산해 정수로 반올림합니다. 최신성은 점수에 포함하지 않습니다.
 - 동일 URL의 동시 평가를 프로세스 내 잠금으로 합칩니다. DB URL UNIQUE 제약은 여러 프로세스에서도 기사 행 중복을 막습니다. 여러 워커를 운영할 경우 평가 호출 자체의 중복까지 막으려면 분산 잠금이 추가로 필요합니다.
 - 완성된 샘플을 복사해도 기사 ID는 재사용하고 연결·선택 행만 복사합니다. 선택 API는 순서가 있는 `article_ids` 배열을 받습니다.
 - 기존 전처리 호출을 정확히 역추적할 수 없는 샘플 연결의 `request_id`는 NULL로 이전합니다. 기존 평가 요청은 `articles.request_id`로 보존합니다.
-- 구독 자동 수집·선정 실행은 아직 구현하지 않았으며 공통 평가 함수와 저장 구조를 재사용할 수 있습니다.
+- 구독 자동 수집은 구현되었으며, 구독 평가도 연결되어 있으며, 선정·발행은 아직 연결하지 않았습니다.
 
 ### 샘플 결과와 실행 이력
 
@@ -52,7 +52,7 @@
 
 ## Newsletter email
 
-`POST /api/newsletter-email` accepts `request_id`, `kind` (`sample` or `subscription`), `newsletter_id`, and `user_ids` (up to 100). It loads authorized HTML and recipient addresses from the database, sends separate HTML MIME messages through Gmail SMTP SSL (465), and records results in `mailing`. Repeating a request ID returns its stored results without resending. `sent` means SMTP acceptance, not guaranteed inbox delivery; `unknown` is not automatically retried.
+`POST /api/newsletter-email` accepts `request_id`, `kind` (`sample` or `subscription`), `newsletter_id`, and `user_ids` (up to 100). It loads authorized HTML and recipient addresses from the database, sends one HTML MIME message with all unique selected addresses in To through Gmail SMTP SSL (465), and records results in `mailing`. Repeating a request ID returns its stored results without resending. `sent` means SMTP acceptance, not guaranteed inbox delivery; `unknown` is not automatically retried.
 
 Set `GMAIL_USER` and `GMAIL_APP_PASSWORD` in the ignored root `.env`. The normal account password is not used. `GMAIL_CA_BUNDLE` and `GMAIL_LEGACY_CA=1` support an already trusted legacy corporate CA while keeping certificate/hostname verification enabled. SMTP network access is required.
 
@@ -64,4 +64,28 @@ On this network, Gmail disconnects after EHLO. Delivery therefore uses the exist
 
 ### Article images and email CID
 
-Article images are downloaded after shared scoring and saved as validated, resized JPEGs under `backend/workspace/{article_id}/image-{url_hash}.jpg`. `articles.image_storage_path` is relative to backend/. Workspace files are ignored by Git and must be backed up with app.db. Downloads check public hosts and redirects, bound size, and retain TLS verification. Mail preparation retries missing files, reuses local images across recipients, and sends multipart/related CID inline attachments (up to 10 MiB of image data per newsletter). Unavailable images are omitted from email; original HTML and image links remain unchanged. Existing caches survive startup migrations.
+Article images are downloaded after shared scoring and saved as validated, resized JPEGs under `backend/workspace/{article_id}/image-{url_hash}.jpg`. `articles.image_storage_path` is relative to backend/. Workspace files are ignored by Git and must be backed up with app.db. Downloads check public hosts and redirects, bound size, and retain TLS verification. Mail preparation retries missing files, attaches local images once per shared message, and sends multipart/related CID inline attachments (up to 10 MiB of image data per newsletter). Unavailable images are omitted from email; original HTML and image links remain unchanged. Existing caches survive startup migrations.
+
+## Daily subscription collection
+
+- FastAPI lifespan starts an in-process scheduler. With the backend running, polling every 30 seconds triggers collection from 05:00 Asia/Seoul. The target is the previous calendar day, 00:00 inclusive through next 00:00 exclusive KST. This version uses exactly that day, without overlapping search windows.
+- Collect once per sample with at least one active subscription and active account. The first eligible collection date is the later of subscription creation date (KST) and configured start_date; the earliest eligible active subscription sets the shared start. Daily/weekly/monthly settings affect future publication, not daily collection.
+- Restart catches up missing dates oldest first (up to seven dates per sample per pass). Failures retry after an hour, up to three attempts per date; authenticated manual calls can retry afterward. SQLite enforces one running collection per sample and one record per sample/date. Runs time out after 360 seconds; abandoned claims can be reclaimed after ten minutes using an attempt token, preventing stale writers from committing.
+- Shared Exa queries (up to five) -> canonical URL deduplication -> remove all URLs already linked to this sample, even if older than seven days -> one subscription-specific LLM pass over new candidates and articles linked within the preceding seven days. Strict **specific-subtopic** deduplication rejects incremental features, new figures and follow-up coverage of the same specific subtopic. Broad company/category matches alone do not exclude everything. LLM evidence is title/date/URL/highlights, never full content; response contains only new candidate indices.
+- Atomically insert raw `articles` by globally unique URL and link survivors in `subscripted_articles`. Existing global article IDs/content/evaluations are reused unchanged. New rows have NULL scoring, summary, newsletter_title and evaluation request_id. Rejected candidates are not stored. Link request_id points to preprocessing; run_id points to the daily execution. Optional image caching runs afterward.
+- `subscription_collection_runs` records sample, date, initiating user, attempts, configuration snapshot, LLM request, counts and timestamps. Counts include search results, invalid results, URL duplicates, previously linked URLs, input candidates, retained and saved articles. `llm_requests` records model/tokens/timing under `subscription_article_preprocessing`; scheduled calls are attributed to the earliest active subscriber. Failures are recorded in `errors` with the executing step. No issues, editions, subscription delivery history, or mailings are created.
+- `POST /api/subscriptions/{subscription_id}/collect` with `{}` collects yesterday, or supply `{"collection_date":"YYYY-MM-DD"}` for an earlier date. Caller must own an active subscription; today/future dates are rejected. Repeating a completed sample/date returns its result without external calls.
+- `GET /api/subscriptions/{subscription_id}/collections` returns shared execution history to that subscription's owner, including paused/cancelled subscriptions. Prompt/configuration snapshots and lease tokens are not exposed.
+- `WIANEWS_SUBSCRIPTION_COLLECTION_ENABLED=0` disables automatic scheduling (manual API remains available). No frontend collection controls or subscription publication are included in this stage.
+- Migration merges previous per-subscription article links into `(sample_id, article_id)`, preserving issues. Legacy link time falls back to known preprocessing completion/article collection time because the old schema did not record link timestamps. Future links always use actual insertion time.
+
+Group email sends one SMTP DATA transaction to up to 100 selected users; duplicate addresses are collapsed. SMTP recipient refusals are recorded per user, successful recipients are not resent, and disconnected submissions remain unknown. Recipients can see the full To list.
+
+## Shared Hyundai Wia newsletter design
+
+`backend/template/newsletter.html` is the single table-based, inline-styled template used by sample generation, browser previews, HTML downloads and email rendering. `backend/mail/newsletter_email.html` is a symlink to that source. The palette is navy #00287a, red #c8102e, and footer #001a52, with a white HYUNDAI WIA masthead, centered WiaNews hero, numbered highlights, article sections and source buttons. Summaries remain justified and preserve line breaks. Browser/export use original image URLs; email preparation substitutes CID sources and retains original-image links. The HTML carries data-newsletter markers so email conversion can preserve the complete article data and safely re-render the same design. Legacy stored HTML remains readable by the converter.
+
+### Subscription scoring
+- After collection commits, `subscriptions/scoring.py` loads all articles linked to that sample and evaluates only rows for which `evaluation_complete` is false. Existing valid scores, Korean newsletter headlines and summaries are reused across samples/subscriptions.
+- Uses shared `news/news_scoring.py`: technical 40%, organization 30%, impact 30%. Results, headline, summary, score version/time and evaluation request_id are stored in `articles`; `llm_requests.step` is `subscription_article_scoring`, with the triggering user and token usage. Preprocessing request IDs in collection runs and article links are preserved.
+- Evaluation failure does not undo collection. Raw rows remain available; the next daily collection or a manual collection call retries incomplete evaluations, including older articles. Calling an already completed collection skips Exa/preprocessing and retries evaluation only. Scoring has a separate 360-second timeout. No issues, editions or emails are created.

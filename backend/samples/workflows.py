@@ -1,5 +1,5 @@
 """Persist sample settings, article selections, and generated newsletters."""
-from backend.core.paths import BACKEND_DIR
+from backend.news.newsletter_rendering import render_newsletter
 from backend.news.newsletter_summary import generate_newsletter_summary
 from backend.core.tracking import sample_context
 from backend.core.error_storage import record_sample_error
@@ -12,7 +12,6 @@ from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel, Field, field_validator
 
 from backend.core.auth import database, now
@@ -24,9 +23,7 @@ from backend.core.recommendation_tokens import sign_recommendation, verify_recom
 from backend.recommendations.query_storage import queries_for_sample, QueryInput, save_selected_queries
 
 router = APIRouter(prefix='/api', route_class=ErrorRoute, dependencies=[Depends(member_user)])
-templates = Environment(loader=FileSystemLoader((BACKEND_DIR / 'template')),
-                        autoescape=select_autoescape(['html']))
-TEMPLATE_VERSION = 'wianews-v1'
+TEMPLATE_VERSION = 'hyundai-wia-v1'
 
 
 def owned_sample(db, sample_id, user_id):
@@ -275,7 +272,7 @@ async def make_newsletter(sample_id: str, user=Depends(member_user)):
             db.execute('BEGIN IMMEDIATE')
             if summary_input(db,sample_id,user['user_id'])[2]!=revision:
                 raise HTTPException(409,'생성 중 기사 선택이나 설정이 변경되었습니다. 다시 생성해 주세요.')
-            html=templates.get_template('newsletter.html').render(title=sample['topic'],topic=sample['topic'],
+            html=render_newsletter(title=sample['topic'],
                 dates={'start':sample['collection_start_date'],'end':sample['collection_end_date']},issues=issues,total_summary=total_summary)
             stamp=now()
             db.execute('UPDATE sample_newsletters SET html_content=?,total_summary=?,request_id=? WHERE sample_id=?',(html,total_summary,request_id,sample_id))
