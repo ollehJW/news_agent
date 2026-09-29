@@ -15,7 +15,8 @@ from backend.integrations.llm_client import ConfigurationError, InvalidLLMRespon
 from backend.recommendations.streaming import router as streaming_router
 from backend.subscriptions.subscriptions import router as subscriptions_router
 from backend.subscriptions.collection import router as collection_router
-from backend.subscriptions.scheduler import start_scheduler
+from backend.subscriptions.scheduler import start_scheduler,start_publication_scheduler
+from backend.subscriptions.publication import init_publication_db
 from backend.recommendations.subject_validation import router as subject_validation_router
 from backend.samples.sample_collection import router as sample_collection_router
 from backend.core.tracking import init_newsletter_db, sample_context
@@ -26,13 +27,15 @@ async def lifespan(app):
     init_db()
     init_newsletter_db()
     init_mail_db()
+    init_publication_db()
     scheduler=start_scheduler()
+    publisher=start_publication_scheduler()
     try:
         yield
     finally:
-        if scheduler:
-            scheduler.cancel()
-            await asyncio.gather(scheduler,return_exceptions=True)
+        tasks=[task for task in (scheduler,publisher) if task]
+        for task in tasks:task.cancel()
+        await asyncio.gather(*tasks,return_exceptions=True)
 
 
 app = FastAPI(title='WiaNews API', version='0.2.0', lifespan=lifespan)

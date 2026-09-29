@@ -52,3 +52,21 @@ async def scheduler_loop():
 def start_scheduler():
     if os.getenv('WIANEWS_SUBSCRIPTION_COLLECTION_ENABLED','1')!='1':return None
     return asyncio.create_task(scheduler_loop(),name='subscription-daily-collection')
+
+
+async def publication_loop():
+    from backend.subscriptions.publication import due_publications,publish_subscription
+    while True:
+        try:
+            for sid,day in due_publications():
+                try:await publish_subscription(sid,day)
+                except asyncio.CancelledError:raise
+                except Exception as error:log.warning('Subscription publication failed: subscription=%s date=%s type=%s',sid,day,type(error).__name__)
+        except asyncio.CancelledError:raise
+        except Exception:log.exception('Subscription publication scheduler tick failed')
+        await asyncio.sleep(30)
+
+
+def start_publication_scheduler():
+    if os.getenv('WIANEWS_SUBSCRIPTION_PUBLICATION_ENABLED','1')!='1':return None
+    return asyncio.create_task(publication_loop(),name='subscription-daily-publication')

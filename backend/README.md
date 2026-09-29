@@ -37,7 +37,7 @@
 - 동일 URL의 동시 평가를 프로세스 내 잠금으로 합칩니다. DB URL UNIQUE 제약은 여러 프로세스에서도 기사 행 중복을 막습니다. 여러 워커를 운영할 경우 평가 호출 자체의 중복까지 막으려면 분산 잠금이 추가로 필요합니다.
 - 완성된 샘플을 복사해도 기사 ID는 재사용하고 연결·선택 행만 복사합니다. 선택 API는 순서가 있는 `article_ids` 배열을 받습니다.
 - 기존 전처리 호출을 정확히 역추적할 수 없는 샘플 연결의 `request_id`는 NULL로 이전합니다. 기존 평가 요청은 `articles.request_id`로 보존합니다.
-- 구독 자동 수집은 구현되었으며, 구독 평가도 연결되어 있으며, 선정·발행은 아직 연결하지 않았습니다.
+- 구독 자동 수집·평가와 오전 8시 자동 선정·발행·구독별 묶음 메일 발송이 연결되어 있습니다.
 
 ### 샘플 결과와 실행 이력
 
@@ -76,7 +76,7 @@ Article images are downloaded after shared scoring and saved as validated, resiz
 - `subscription_collection_runs` records sample, date, initiating user, attempts, configuration snapshot, LLM request, counts and timestamps. Counts include search results, invalid results, URL duplicates, previously linked URLs, input candidates, retained and saved articles. `llm_requests` records model/tokens/timing under `subscription_article_preprocessing`; scheduled calls are attributed to the earliest active subscriber. Failures are recorded in `errors` with the executing step. No issues, editions, subscription delivery history, or mailings are created.
 - `POST /api/subscriptions/{subscription_id}/collect` with `{}` collects yesterday, or supply `{"collection_date":"YYYY-MM-DD"}` for an earlier date. Caller must own an active subscription; today/future dates are rejected. Repeating a completed sample/date returns its result without external calls.
 - `GET /api/subscriptions/{subscription_id}/collections` returns shared execution history to that subscription's owner, including paused/cancelled subscriptions. Prompt/configuration snapshots and lease tokens are not exposed.
-- `WIANEWS_SUBSCRIPTION_COLLECTION_ENABLED=0` disables automatic scheduling (manual API remains available). No frontend collection controls or subscription publication are included in this stage.
+- `WIANEWS_SUBSCRIPTION_COLLECTION_ENABLED=0` disables automatic scheduling (manual API remains available). The publication scheduler is separate from collection; no frontend collection controls are included.
 - Migration merges previous per-subscription article links into `(sample_id, article_id)`, preserving issues. Legacy link time falls back to known preprocessing completion/article collection time because the old schema did not record link timestamps. Future links always use actual insertion time.
 
 Group email sends one SMTP DATA transaction to up to 100 selected users; duplicate addresses are collapsed. SMTP recipient refusals are recorded per user, successful recipients are not resent, and disconnected submissions remain unknown. Recipients can see the full To list.
@@ -88,4 +88,35 @@ Group email sends one SMTP DATA transaction to up to 100 selected users; duplica
 ### Subscription scoring
 - After collection commits, `subscriptions/scoring.py` loads all articles linked to that sample and evaluates only rows for which `evaluation_complete` is false. Existing valid scores, Korean newsletter headlines and summaries are reused across samples/subscriptions.
 - Uses shared `news/news_scoring.py`: technical 40%, organization 30%, impact 30%. Results, headline, summary, score version/time and evaluation request_id are stored in `articles`; `llm_requests.step` is `subscription_article_scoring`, with the triggering user and token usage. Preprocessing request IDs in collection runs and article links are preserved.
-- Evaluation failure does not undo collection. Raw rows remain available; the next daily collection or a manual collection call retries incomplete evaluations, including older articles. Calling an already completed collection skips Exa/preprocessing and retries evaluation only. Scoring has a separate 360-second timeout. No issues, editions or emails are created.
+- Evaluation failure does not undo collection. Raw rows remain available; the next daily collection or a manual collection call retries incomplete evaluations, including older articles. Calling an already completed collection skips Exa/preprocessing and retries evaluation only. Scoring has a separate 360-second timeout. The scoring step itself does not create issues, editions or emails; scheduled publication handles these separately.
+
+### Subscription members
+`subscription_members` stores typed recipients with `member_id`, `subscription_id`, `member_type` (`internal` / `external`), `user_id`, `email_address`, and `created_at`. Internal members have only user_id; external members have only email_address. The database enforces exclusive identities and uniqueness per subscription. Legacy subscriptions.email_addresses is migrated and removed: an unambiguous existing account email maps to an internal member; other addresses remain external.
+Subscription settings use a `members` array. Owners manage schedules and recipients; internal members can see the subscription, marketplace membership, and linked archive editions. Owners alone receive the full member list. External email entries do not grant account access. Counts use distinct resolved email addresses in active subscriptions. Internal addresses resolve from users at read time.
+
+The shared recipient dialog has employee and other-email tabs in both subscription settings and archive mailing. Mail requests accept `recipients: [{member_type, user_id, email_address}]` (legacy user_ids requests remain supported). `mailing_list` and `results_json` store member_type, user_id, name and the actual email_address used at send time; external recipients have null user_id. Old mailing JSON is migrated without resending. Recipient identities govern retry protection, while SMTP addresses are deduplicated across internal and external entries.
+
+### Scheduled subscription publication and mailing
+- `subscriptions/publication.py` and a separate scheduler task evaluate daily/weekly/monthly schedules every 30 seconds. Eligible active subscriptions created by 08:00 KST are processed at/after 08:00 on the scheduled date. A late restart catches up on the same day; older missed publication dates are not automatically mailed. Month-end dates clamp to the last day of shorter months.
+- Coverage ends yesterday, because 05:00 collection fetches yesterday. The first period starts at the later of configured start_date and subscription creation date (KST). Following periods start the day after the prior delivered coverage end (the previous publication date for normal 08:00 editions). This preserves inclusive publication-day boundaries without counting an unfinished current day.
+- Require yesterday's shared collection to be complete and all stored period candidates to have valid evaluations. Choose up to five issues using a subscription-specific index-only LLM call from the top 50 candidates with total_score >=70. Then generate issue highlights via the shared summary prompt, tracked as subscription_newsletter_summary. Empty/low-quality periods do not send empty newsletters.
+- Store selected subscripted_issues, a shared subscripted_newsletters edition, and last_issued_newsletter_id. One edition is reused for the same sample_id and coverage period; source subscriptions retain their individual delivery jobs. The service runs a single worker; per-edition async locks avoid duplicate generation and the DB unique coverage key prevents duplicate edition records.
+- Each subscription resolves current internal users.email and external email_address immediately before sending. Inactive internal users are excluded. Send one MIME message with all distinct addresses in To; A10 and B20 produce two SMTP submissions. Existing inline image attachments and newsletter rendering are reused. Manual sending stays available.
+- `mailing.subscription_id` links automatic delivery to its subscription; a unique subscription/edition index and durable request identity prevent duplicate submissions. Recipient snapshots, per-address results, and timestamps remain in mailing. At least one accepted recipient creates subscription_history; actual SMTP acceptance is not an inbox delivery guarantee.
+- `subscription_publication_jobs` stores each subscription/date execution with a renewable-on-recovery attempt token and 15-minute stale lease. Generation has a 10-minute timeout. Failures before mail submission retry after an hour, up to three scheduled attempts on the same day. Once a mailing row is claimed, failures/unknown outcomes are marked for review rather than automatically resent. Review and errors are recorded; no external messages are sent for diagnostics.
+- `WIANEWS_SUBSCRIPTION_PUBLICATION_ENABLED=0` disables publication/mailing separately from collection. Both schedulers require a running backend.
+
+### 멤버별 수신 상태
+
+- `subscription_members.status`: `active`(ON), `paused`(OFF). 기존 전체 일시정지 구독은 멤버 전원을 OFF로 이관하고 구독 자체는 활성 상태로 전환합니다.
+- `PATCH /api/subscriptions/{id}/members/status`: `member_ids`와 `status`로 선택한 멤버의 수신 상태를 변경합니다. 관리자는 자기 구독의 멤버, 참여자는 본인만 변경할 수 있습니다.
+- 내 구독 스위치는 본인의 수신 상태를 표시합니다. 관리자가 수신 멤버가 아닌 경우에는 ON 멤버 존재 여부를 표시합니다. 팝업에서 일시정지/재개 및 대상 멤버를 고릅니다.
+- 멤버 편집 시 기존 ON/OFF 상태는 유지됩니다. OFF 멤버는 발송 직전 수신자 조회에서 제외되며, 재개 시 다음 발행부터 포함됩니다. 이미 메일 서버에 제출된 메일은 회수하지 않습니다.
+- 구독 전체의 `status` 변경 API는 취소만 허용합니다. 모든 멤버가 OFF여도 구독/멤버를 삭제하지 않으며 수집은 유지됩니다.
+
+### 전체 도메인 검색
+
+- `sample_newsletters.search_all_domains`는 0(등록한 도메인 제한, 기본값) / 1(전체 검색)입니다. 샘플 조회·저장·복제와 구독 수집 설정에 함께 전달됩니다.
+- AI 추천이 정상 완료됐지만 도메인이 0개면 팝업에서 전체 검색을 제안합니다. 사용자가 추가를 누르면 선택한 검색 쿼리와 전체 검색 여부를 저장합니다. 연결 오류는 빈 추천 결과와 구분합니다.
+- 전체 검색에서는 Exa 요청의 `includeDomains`를 생략합니다. 수집 기간, URL 정규화, 내용·발행일 검증, 주제·중복 전처리 및 점수 평가는 유지합니다. 실제 수집 출처는 공용 `domains`에 저장하고 기사에 연결합니다.
+- Step 1의 전체 검색 체크를 해제하면 기존 등록 도메인으로 다시 제한할 수 있습니다.

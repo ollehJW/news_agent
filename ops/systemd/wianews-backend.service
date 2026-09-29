@@ -1,0 +1,17 @@
+[Unit]
+Description=WiaNews API and subscription schedulers
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wia/projects/wianews
+Environment=PYTHONUNBUFFERED=1
+Environment=WIANEWS_COOKIE_SECURE=1
+ExecStart=/home/wia/projects/wianews/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 9801 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=5
+TimeoutStopSec=120
+UMask=0077
+
+[Install]
+WantedBy=default.target

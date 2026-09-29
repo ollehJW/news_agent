@@ -6,7 +6,7 @@ import { streamRecommendedDomains } from './api';
 const LIMIT = 20;
 const queryKey=q=>q.trim().replace(/\s+/g,' ').toLocaleLowerCase();
 
-export function DomainBox({ queries=[], domains, onQueriesChange, onChange, onRecommend, disabled=false }) {
+export function DomainBox({ queries=[], domains, onQueriesChange, onChange, onRecommend, disabled=false, searchAllDomains=false, onSearchScopeChange }) {
   const [input, setInput] = useState('');
   const [queryInput,setQueryInput]=useState('');
   const [queryError,setQueryError]=useState('');
@@ -34,7 +34,9 @@ export function DomainBox({ queries=[], domains, onQueriesChange, onChange, onRe
       {queries.length?<ol className="collection-query-list">{queries.map((q,i)=><li key={q.query_id||i}><span>{String(i+1).padStart(2,'0')}</span><p>{q.query}</p><button className="icon-button" disabled={disabled} aria-label={`${q.query} 쿼리 삭제`} onClick={()=>updateQueries(queries.filter((_,index)=>index!==i))}><X size={15}/></button></li>)}</ol>:<div className="source-empty"><Search size={27}/><h3>아직 추가한 쿼리가 없어요</h3><p>AI 추천을 받거나 아래에서 직접 추가해 주세요.</p></div>}
       <form className="custom-domain" onSubmit={addQuery}><label htmlFor="direct-query"><Plus size={15}/>검색 쿼리 직접 추가</label><div><input id="direct-query" disabled={disabled} maxLength={400} placeholder="예: Agentic AI research and applications" value={queryInput} onChange={e=>setQueryInput(e.target.value)}/><button type="submit" className="button" disabled={disabled||!queryInput.trim()||queries.length>=5}><Plus size={14}/>추가</button></div>{queryError&&<p className="error" role="alert">{queryError}</p>}</form><p className="source-limit">최대 5개 · 검색에 사용할 문장을 입력해 주세요.</p>
     </section>
-    <section className="collection-domain-section" aria-labelledby="collection-domain-title"><h3 id="collection-domain-title"><Globe2 size={16}/>수집할 도메인 <span className="count">{domains.length}</span></h3>
+    <section className="collection-domain-section" aria-labelledby="collection-domain-title"><h3 id="collection-domain-title"><Globe2 size={16}/>수집할 도메인 <span className="count">{searchAllDomains?'전체':domains.length}</span></h3>
+    <label className="all-domains-option"><input type="checkbox" checked={searchAllDomains} disabled={disabled} onChange={e=>onSearchScopeChange(e.target.checked)}/><span><strong>전체 도메인 검색</strong><small>특정 사이트로 제한하지 않고 검색 쿼리와 수집 기간을 기준으로 찾습니다.</small></span></label>
+    {!searchAllDomains&&<>
     <div className="managed-domains" aria-label="등록한 도메인 목록">
       {domains.length ? domains.map(d => <article className="managed-domain" key={d.host}>
         <span className="domain-mark"><Globe2 size={19}/></span>
@@ -48,15 +50,17 @@ export function DomainBox({ queries=[], domains, onQueriesChange, onChange, onRe
       {error&&<p className="error" role="alert">{error}</p>}
     </form>
     <p className="source-limit">최대 20개 · AI 추천과 직접 추가한 도메인을 함께 관리합니다.</p>
+    </>}
     </section></div>
   </section>;
 }
 
-export function DomainRecommendationModal({ topic, existing, onClose, onAdd, sampleId, existingQueries=[], saving=false }) {
+export function DomainRecommendationModal({ topic, existing, onClose, onAdd, sampleId, existingQueries=[], saving=false, searchAllDomains=false }) {
   const dialog = useRef(null);
 
   const [queries,setQueries]=useState([]);
   const [queriesReady,setQueriesReady]=useState(false);
+  const [acceptAllDomains,setAcceptAllDomains]=useState(true);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [requestError, setRequestError] = useState('');
@@ -83,9 +87,11 @@ export function DomainRecommendationModal({ topic, existing, onClose, onAdd, sam
   },[topic,attempt,sampleId]);
   useEffect(()=>{const previous=document.activeElement;dialog.current.showModal();return()=>previous?.focus();},[]);
 
+  const allDomainsFallback=!loading&&!requestError&&!items.length&&queriesReady;
+  const useAllDomains=allDomainsFallback&&acceptAllDomains;
   async function confirm() {
-    if(loading||saving||overLimit||queryOverLimit||(!selected.length&&!selectedQueries.length))return;
-    try{await onAdd(selected.map(({selected,...domain})=>domain),selectedQueries.map(({selected,...q})=>q));}catch(err){setRequestError(err.message);}
+    if(loading||saving||overLimit||queryOverLimit||(!selected.length&&!selectedQueries.length&&!useAllDomains))return;
+    try{await onAdd(selected.map(({selected,...domain})=>domain),selectedQueries.map(({selected,...q})=>q),useAllDomains||searchAllDomains);}catch(err){setRequestError(err.message);}
   }
   return <dialog ref={dialog} onCancel={e=>{if(saving)e.preventDefault();else onClose();}} onClick={e=>{if(!saving&&e.target===dialog.current)onClose();}} className="domain-dialog" aria-labelledby="domain-dialog-title">
     <div className="modal-head"><div className="modal-icon"><Sparkles size={23}/></div><div><span className="eyebrow">CURATE YOUR SOURCES</span><h2 id="domain-dialog-title">AI 추천 쿼리 및 도메인</h2><p>검색 쿼리를 확인하고, 목록에 추가할 출처를 선택하세요.</p></div><button className="icon-button" aria-label="팝업 닫기" disabled={saving} onClick={onClose}><X size={20}/></button></div>
@@ -110,9 +116,9 @@ export function DomainRecommendationModal({ topic, existing, onClose, onAdd, sam
             <span className="domain-mark"><Globe2 size={19}/></span><div className="domain-copy"><div><h3>{d.name}</h3><span className="source-kind">{d.kind}</span>{registered&&<span className="registered-label"><Check size={11}/>추가됨</span>}<a href={`https://${d.host}`} target="_blank" rel="noreferrer" aria-label={`${d.name} 홈페이지 열기`}><ExternalLink size={13}/></a></div><span className="domain-host">{d.host}</span><p>{d.desc}</p><p className="domain-relevance">주제 관련성 · {d.relevance}</p><div className="reason"><ShieldCheck size={14}/><span>{d.reason}</span></div></div>
           </article>;
         })}
-        {!loading&&!requestError&&!items.length&&<div className="empty compact"><Globe2 size={26}/><h3>추천할 도메인을 찾지 못했어요</h3><p>주제를 구체적으로 바꾸거나 목록에서 직접 추가해 주세요.</p></div>}
+        {!loading&&!requestError&&!items.length&&<div className="empty compact"><Globe2 size={26}/><h3>전체 도메인 검색을 추천해요</h3><p>확실한 추천 출처를 찾지 못했습니다. 특정 도메인으로 제한하지 않고 주제에 맞는 뉴스를 검색할 수 있어요.</p><label className="all-domains-option"><input type="checkbox" checked={acceptAllDomains} onChange={e=>setAcceptAllDomains(e.target.checked)}/><strong>전체 도메인 검색으로 추가</strong></label></div>}
       </div>
     </div>
-    <div className="modal-footer"><span className={overLimit?'selection-limit-error':''}>{overLimit?`최대 20개까지 등록할 수 있어요. ${existing.length+selected.length-LIMIT}개를 해제해 주세요.`:`쿼리 ${selectedQueries.length}개 · 도메인 ${selected.length}개 선택`}</span><button className="button" disabled={saving} onClick={onClose}>취소</button><button className="button primary" disabled={loading||saving||overLimit||queryOverLimit||(!selected.length&&!selectedQueries.length)} onClick={confirm}>추가</button></div>
+    <div className="modal-footer"><span className={overLimit?'selection-limit-error':''}>{overLimit?`최대 20개까지 등록할 수 있어요. ${existing.length+selected.length-LIMIT}개를 해제해 주세요.`:`쿼리 ${selectedQueries.length}개 · ${useAllDomains?'전체 도메인 검색':`도메인 ${selected.length}개 선택`}`}</span><button className="button" disabled={saving} onClick={onClose}>취소</button><button className="button primary" disabled={loading||saving||overLimit||queryOverLimit||(!selected.length&&!selectedQueries.length&&!useAllDomains)} onClick={confirm}>추가</button></div>
   </dialog>;
 }

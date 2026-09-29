@@ -58,6 +58,7 @@ def editable_sample(db,sid):
     new_id=str(uuid.uuid4())
     from backend.samples.runs import create_run
     db.execute('INSERT INTO sample_newsletters (sample_id,created_at) VALUES (?,?)',(new_id,now()))
+    db.execute('UPDATE sample_newsletters SET search_all_domains=? WHERE sample_id=?',(row['search_all_domains'],new_id))
     create_run(db,new_id,row['user_id'],row['topic'],row['collection_start_date'],row['collection_end_date'],'topic_setup')
     db.execute('INSERT INTO sample_domains SELECT ?,domain_id,request_id,kind,description,recommendation_reason,topic_relevance,created_at FROM sample_domains WHERE sample_id=?',(new_id,sid))
     for query in db.execute('SELECT * FROM sample_queries WHERE sample_id=? ORDER BY position',(sid,)).fetchall():

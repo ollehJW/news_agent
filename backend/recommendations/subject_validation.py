@@ -1,4 +1,5 @@
 """Compare a proposed subject with active marketplace subjects before creation."""
+from backend.subscriptions.members import ACCESS
 import asyncio
 import json
 import uuid
@@ -95,7 +96,7 @@ async def validate_subject(body: ValidationBody,user=Depends(member_user)):
             recommendations=[]
             for match in matches:
                 info=sample_info(db,match['sample_id'])
-                subscription=db.execute('SELECT status FROM subscriptions WHERE sample_id=? AND user_id=?',(match['sample_id'],user['user_id'])).fetchone()
+                subscription=db.execute(f"SELECT s.status FROM subscriptions s WHERE s.sample_id=? AND {ACCESS} AND s.status!='cancelled' ORDER BY CASE s.status WHEN 'active' THEN 0 ELSE 1 END LIMIT 1",(match['sample_id'],user['user_id'],user['user_id'])).fetchone()
                 count=db.execute("SELECT count(*) FROM subscriptions WHERE sample_id=? AND status='active'",(match['sample_id'],)).fetchone()[0]
                 recommendations.append({**info,**match,'subscriberCount':count,
                     'subscriptionStatus':subscription['status'] if subscription else None})

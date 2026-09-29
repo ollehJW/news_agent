@@ -10,11 +10,11 @@ Write in a crisp Korean newsletter headline style, not explanatory prose. Each h
 Each highlight must be one short line, without a leading bullet, numbering, heading, Markdown emphasis or newline. The server will format each as a hyphen bullet. Return only the JSON object with the highlights array.'''
 SUMMARY_SCHEMA=object_schema({'highlights':{'type':'array','minItems':1,'maxItems':3,'items':{'type':'string','maxLength':90}}})
 
-async def generate_newsletter_summary(topic,issues):
+async def generate_newsletter_summary(topic,issues,*,operation='sample_newsletter_summary'):
     raw=await chat_completion([
         {'role':'system','content':SUMMARY_PROMPT},
         {'role':'user','content':json.dumps({'topic':topic,'articles':[{'title':i['title'],'summary':i['summary']} for i in issues]},ensure_ascii=False)},
-    ],SUMMARY_SCHEMA,max_tokens=4000,operation='sample_newsletter_summary',schema_name='newsletter_highlights')
+    ],SUMMARY_SCHEMA,max_tokens=4000,operation=operation,schema_name='newsletter_highlights')
     try:
         data=json.loads(raw)
         lines=data['highlights']

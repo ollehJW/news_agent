@@ -29,7 +29,7 @@ def publication_day(value):
         return stamp.replace(tzinfo=timezone.utc).astimezone(KST).date() if stamp.tzinfo is None else stamp.astimezone(KST).date()
     except ValueError:return None
 
-def normalize_results(results,domains,start,end):
+def normalize_results(results,domains,start,end,*,search_all_domains=False):
     by_url={}; rejected=0
     hosts=sorted(domains,key=lambda d:len(d['host']),reverse=True)
     for item in results:
@@ -37,16 +37,17 @@ def normalize_results(results,domains,start,end):
         host=urlsplit(url).hostname if url else ''
         domain=next((d for d in hosts if host==d['host'] or host.endswith('.'+d['host'])),None)
         title=item.get('title');content=item.get('text')
-        if not url or not domain or not published or not start<=published<=end or published>datetime.now(KST).date() or not isinstance(title,str) or not title.strip() or not isinstance(content,str) or len(content.strip())<120:
+        if not url or (not domain and not search_all_domains) or not published or not start<=published<=end or published>datetime.now(KST).date() or not isinstance(title,str) or not title.strip() or not isinstance(content,str) or len(content.strip())<120:
             rejected+=1;continue
-        row={'url':url,'domain_id':domain['domain_id'],'title':title.strip()[:1000],'published_at':published.isoformat(),
+        row={'url':url,'domain_id':domain['domain_id'] if domain else None,'title':title.strip()[:1000],'published_at':published.isoformat(),
              'content':content[:20000],
              'highlights':[h for h in item.get('highlights',[]) if isinstance(h,str) and h.strip()] if isinstance(item.get('highlights'),list) else None,
              'image_url':article_image_url(canonical_url(item.get('image')),canonical_url(item.get('favicon'))),'favicon_url':canonical_url(item.get('favicon'))}
         if url not in by_url or len(row['content'])>len(by_url[url]['content']):by_url[url]=row
     return list(by_url.values()),rejected
 
-async def search_articles(queries,domains,start,end,on_progress):
+async def search_articles(queries,domains,start,end,on_progress,*,search_all_domains=False):
+    if not search_all_domains and not domains:raise HTTPException(400,'수집할 도메인 또는 전체 도메인 검색을 선택해 주세요.')
     if not 1<=len(queries)<=5:raise HTTPException(400,'검색 쿼리는 1~5개로 설정해 주세요.')
     key=os.getenv('EXA_API_KEY','').strip()
     if not key:raise HTTPException(503,'Exa API 키가 설정되지 않았습니다.')
@@ -62,7 +63,8 @@ async def search_articles(queries,domains,start,end,on_progress):
                 for attempt in range(2):
                     try:
                         res=await client.post('https://api.exa.ai/search',headers={'x-api-key':key},json={
-                            'query':query['query'],'type':'auto','numResults':10,'includeDomains':[d['host'] for d in domains],
+                            'query':query['query'],'type':'auto','numResults':10,
+                            **({} if search_all_domains else {'includeDomains':[d['host'] for d in domains]}),
                             'startPublishedDate':lower.isoformat(),'endPublishedDate':upper.isoformat(),
                             'contents':{'text':{'maxCharacters':20000},'highlights':True}})
                     except httpx.HTTPError:
@@ -84,5 +86,5 @@ async def search_articles(queries,domains,start,end,on_progress):
                 if not task.done():task.cancel()
             await asyncio.gather(*tasks,return_exceptions=True)
     raw=[r for group in groups for r in group]
-    articles,rejected=normalize_results(raw,domains,start,end)
+    articles,rejected=normalize_results(raw,domains,start,end,search_all_domains=search_all_domains)
     return articles,{'search_results':len(raw),'invalid_results':rejected,'url_duplicates':len(raw)-rejected-len(articles)}

@@ -117,7 +117,9 @@ async def stream_chat_completion(messages, schema, max_tokens=4000, operation="d
                         raise InvalidLLMResponse('Refused response')
                     if choice.finish_reason is not None:
                         finish_reason = choice.finish_reason
-                    delta = choice.delta.content or ''
+                    # Azure can emit terminal/filter chunks with delta=null.
+                    # Keep finish_reason and usage above, but only yield actual text.
+                    delta = getattr(choice.delta, 'content', None) or ''
                     if delta:
                         text += delta
                         if len(text)>100000:

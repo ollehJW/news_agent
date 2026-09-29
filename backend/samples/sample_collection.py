@@ -25,7 +25,7 @@ _active=set()
 def snapshot(db,sid,uid):
     sample=dict(owned_sample(db,sid,uid))
     domains=sources(db,sid);queries=queries_for_sample(db,sid)
-    revision={'sample':{k:sample[k] for k in ('sample_id','run_id','user_id','topic','collection_start_date','collection_end_date')},'domains':domains,'queries':queries,'issues':[tuple(r) for r in db.execute('SELECT issue_id,article_id,rank FROM sample_issues WHERE sample_id=? ORDER BY issue_id',(sid,))]}
+    revision={'sample':{k:sample[k] for k in ('sample_id','run_id','user_id','topic','collection_start_date','collection_end_date','search_all_domains')},'domains':domains,'queries':queries,'issues':[tuple(r) for r in db.execute('SELECT issue_id,article_id,rank FROM sample_issues WHERE sample_id=? ORDER BY issue_id',(sid,))]}
     return sample,domains,queries,json.dumps(revision,sort_keys=True)
 
 def save_result(sid,uid,revision,articles,scores):
@@ -53,8 +53,8 @@ async def run_collection(sid,uid,config,progress):
     start=date.fromisoformat(sample['collection_start_date']);end=date.fromisoformat(sample['collection_end_date'])
     stage='sample_article_collection'
     try:
-        await progress(0,'선택한 쿼리와 도메인에서 뉴스를 수집하고 있어요')
-        articles,counts=await search_articles(queries,domains,start,end,progress)
+        await progress(0,'전체 도메인에서 뉴스를 수집하고 있어요' if sample['search_all_domains'] else '선택한 쿼리와 도메인에서 뉴스를 수집하고 있어요')
+        articles,counts=await search_articles(queries,domains,start,end,progress,search_all_domains=bool(sample['search_all_domains']))
         prepare_articles(articles)
         stage='sample_article_preprocessing'
         progress_run(sample['run_id'],'news_preprocessing')
@@ -106,7 +106,7 @@ async def collection_events(sid,uid,config):
 async def collect(sample_id:str,user=Depends(tracked_member_user)):
     with database() as db:config=snapshot(db,sample_id,user['user_id'])
     sample,domains,queries,_=config
-    if not domains or not queries or not sample['collection_start_date'] or not sample['collection_end_date']:
+    if (not domains and not sample['search_all_domains']) or not queries or not sample['collection_start_date'] or not sample['collection_end_date']:
         raise HTTPException(400,'수집 쿼리, 도메인, 기간을 먼저 설정해 주세요.')
     if sample_id in _active:raise HTTPException(409,'이 샘플의 수집이 이미 진행 중입니다.')
     with database() as db:

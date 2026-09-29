@@ -1,6 +1,7 @@
 """Shared article identity and reusable, topic-independent evaluations."""
 import json
 import uuid
+from urllib.parse import urlsplit
 from backend.core.auth import database,now
 from backend.integrations.exa_search import canonical_url
 from backend.news.article_images import article_image_url
@@ -30,6 +31,13 @@ def prepare_articles(articles):
     return articles
 
 
+def resolve_article_domain(db,article):
+    if article.get('domain_id'):return article['domain_id']
+    host=urlsplit(article['url']).hostname.lower().removeprefix('www.')
+    db.execute('INSERT INTO domains(domain_id,host,created_at) VALUES(?,?,?) ON CONFLICT(host) DO NOTHING',(str(uuid.uuid4()),host,now()))
+    return db.execute('SELECT domain_id FROM domains WHERE host=?',(host,)).fetchone()[0]
+
+
 def store_evaluation(article,score):
     record={**article,**score,'scored_at':now(),'score_version':SCORE_VERSION}
     record['collected_at']=article.get('collected_at') or now()
@@ -39,6 +47,7 @@ def store_evaluation(article,score):
         db.execute('BEGIN IMMEDIATE')
         existing=decode(db.execute('SELECT * FROM articles WHERE url=?',(record['url'],)).fetchone())
         if existing and evaluation_complete(existing):return existing
+        record['domain_id']=resolve_article_domain(db,record)
         if existing:
             aid=existing['article_id']
             db.execute('UPDATE articles SET '+','.join(f'{k}=?' for k in ARTICLE_FIELDS)+' WHERE article_id=?',(*[record.get(k) for k in ARTICLE_FIELDS],aid))

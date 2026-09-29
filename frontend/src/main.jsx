@@ -45,6 +45,7 @@ function App({user,onLogout}) {
   const [dates,setDates] = useState(initialDates);
   const [step,setStep] = useState(0);
   const [domains,setDomains] = useState([]);
+  const [searchAllDomains,setSearchAllDomains]=useState(false);
   const [queries,setQueries] = useState([]);
   const [modal,setModal] = useState(false);
   const [candidates,setCandidates] = useState([]);
@@ -67,7 +68,7 @@ function App({user,onLogout}) {
   function updateTopic(value) {
     if(value.trim()!==topic.trim()){
       validationController.current?.abort();setApprovedTopic('');setValidation(null);setValidationOpen(false);
-      sampleRef.current=null;setQueries([]);setDomains([]);setCandidates([]);setIssues([]);setGenerated(null);
+      sampleRef.current=null;setQueries([]);setDomains([]);setSearchAllDomains(false);setCandidates([]);setIssues([]);setGenerated(null);
     }
     setTopic(value);setError('');
   }
@@ -103,16 +104,21 @@ function App({user,onLogout}) {
     sampleRef.current={id,topic:topic.trim()};
     setDomains(current=>current.map(d=>({...d,sampleId:id})));
   }
-  async function syncSources(id,items,queryItems) {
-    const result=await authRequest(`/samples/${id}/sources`,{method:'PUT',body:JSON.stringify({queries:queryItems?.map(q=>({query:q.query,recommendation_id:q.recommendation_id})),domains:items.map(d=>({host:d.host,custom:d.custom||d.sampleId!==id,recommendation_id:d.sampleId===id?d.recommendation_id:undefined}))})});
+  async function syncSources(id,items,queryItems,allDomains=searchAllDomains) {
+    const result=await authRequest(`/samples/${id}/sources`,{method:'PUT',body:JSON.stringify({search_all_domains:allDomains,queries:queryItems?.map(q=>({query:q.query,recommendation_id:q.recommendation_id})),domains:items.map(d=>({host:d.host,custom:d.custom||d.sampleId!==id,recommendation_id:d.sampleId===id?d.recommendation_id:undefined}))})});
     adoptSample(result.sample_id);
-    const mapped=result.domains.map(d=>({...d,sampleId:result.sample_id}));setDomains(mapped);setQueries(result.queries||[]);return result.sample_id;
+    const mapped=result.domains.map(d=>({...d,sampleId:result.sample_id}));setDomains(mapped);setQueries(result.queries||[]);setSearchAllDomains(Boolean(result.search_all_domains));return result.sample_id;
   }
   async function changeDomains(items) {
     if(pending)return;
     if(!topic.trim()){setDomains(items);return;}
     setPending(true);setError('');
     try{await syncSources(await ensureSample(),items);}catch(err){setError(err.message);}finally{setPending(false);}
+  }
+  async function changeSearchScope(allDomains) {
+    if(pending)return;
+    setPending(true);setError('');
+    try{await syncSources(await ensureSample(),domains,undefined,allDomains);}catch(err){setError(err.message);}finally{setPending(false);}
   }
   async function changeQueries(items) {
     if(pending)return;
@@ -123,7 +129,7 @@ function App({user,onLogout}) {
     if(!topicApproved){setError('비슷한 뉴스레터를 먼저 확인해 주세요.');return false;}
     if(!topic.trim() || topic.trim().length>120){setError('관심 주제를 1~120자로 입력해 주세요.');return false;}
     if(!queries.length){setError('수집할 쿼리를 1개 이상 추가해 주세요.');return false;}
-    if(!domains.length){setError('수집할 도메인을 1개 이상 추가해 주세요.');return false;}
+    if(!domains.length&&!searchAllDomains){setError('수집할 도메인을 1개 이상 추가해 주세요.');return false;}
     return true;
   }
   async function openDomains() {
@@ -131,9 +137,9 @@ function App({user,onLogout}) {
     setPending(true);setError('');
     try{await syncSources(await ensureSample(),domains);setModal(true);}catch(err){setError(err.message);}finally{setPending(false);}
   }
-  async function addRecommended(selected,selectedQueries=[]) {
+  async function addRecommended(selected,selectedQueries=[],allDomains=searchAllDomains) {
     setPending(true);setError('');
-    try{const merged=new Map(domains.map(d=>[d.host,d]));for(const domain of selected)if(!merged.has(domain.host))merged.set(domain.host,{...domain,sampleId:sampleRef.current.id});const combined=new Map(queries.map(q=>[q.query.trim().replace(/\s+/g,' ').toLocaleLowerCase(),q]));for(const q of selectedQueries){const key=q.query.trim().replace(/\s+/g,' ').toLocaleLowerCase();if(!combined.has(key))combined.set(key,q);}await syncSources(sampleRef.current.id,[...merged.values()],[...combined.values()]);setModal(false);}catch(err){setError(err.message);throw err;}finally{setPending(false);}
+    try{const merged=new Map(domains.map(d=>[d.host,d]));for(const domain of selected)if(!merged.has(domain.host))merged.set(domain.host,{...domain,sampleId:sampleRef.current.id});const combined=new Map(queries.map(q=>[q.query.trim().replace(/\s+/g,' ').toLocaleLowerCase(),q]));for(const q of selectedQueries){const key=q.query.trim().replace(/\s+/g,' ').toLocaleLowerCase();if(!combined.has(key))combined.set(key,q);}await syncSources(sampleRef.current.id,[...merged.values()],[...combined.values()],allDomains);setModal(false);}catch(err){setError(err.message);throw err;}finally{setPending(false);}
   }
   async function nextPeriod() {
     if(!validSources())return;
@@ -183,7 +189,7 @@ function App({user,onLogout}) {
     <main>
       <div className="page-heading"><div><div className="eyebrow">YOUR WEEKLY TECH INTELLIGENCE</div><h1>{view==='schedules'?'구독 관리':view==='archive'?'뉴스레터 보관함':'기술의 흐름을, 한눈에.'}</h1><p>{view==='schedules'?'관심 있는 뉴스레터를 구독하고, 원하는 발행 주기를 설정하세요.':view==='archive'?'직접 만든 샘플과 구독으로 받아본 뉴스레터를 확인하세요.':'관심 있는 주제 하나를 알려주세요. 꼭 알아야 할 기술 소식을 Agent가 정리합니다.'}</p></div></div>
       {error&&<p className="error" role="alert">{error}</p>}
-      {view==='schedules'?<Scheduling newsletters={saved} notify={setToast}/>:view==='archive'? <NewsletterArchive samples={saved} onCreate={reset} onDownload={download} pending={pending}/>:<>
+      {view==='schedules'?<Scheduling user={user} newsletters={saved} notify={setToast}/>:view==='archive'? <NewsletterArchive samples={saved} onCreate={reset} onDownload={download} pending={pending}/>:<>
       <div className="stepper">{steps.map((s,i)=><React.Fragment key={s}><div className={`step ${step===i?'active':''} ${step>i?'done':''}`}><span>{step>i?<Check size={15}/>:String(i+1).padStart(2,'0')}</span><div><small>STEP {i+1}</small><b>{s}</b></div></div>{i<3&&<div className="step-line"/>}</React.Fragment>)}</div>
       <div className="setup-grid studio-grid"><div className="studio-content">{step===0?<div className="setup-main"><section className="panel keyword-panel topic-panel"><div className="section-title"><div className="section-label"><span className="tile-icon"><Hash size={20}/></span><div><h2>어떤 주제를 살펴볼까요?</h2><p>뉴스레터로 받아보고 싶은 주제 하나를 입력해 주세요.</p></div></div></div>
         <label className="field-label" htmlFor="topic-input">뉴스레터 주제 <span>{topic.length}/120자</span></label>
@@ -192,7 +198,7 @@ function App({user,onLogout}) {
         <div className="topic-bottom-row"><div className="suggestions"><span><Sparkles size={13}/>주제 예시</span>{['Agentic AI 기술 및 활용 동향','전기차 통합 열관리 시스템 기술 동향','산업용 로보틱스 기술 동향'].map(example=><button key={example} disabled={pending} onClick={()=>updateTopic(example)}>{example}</button>)}</div>
         <div className="subject-check-action"><Button primary disabled={pending||!topic.trim()} onClick={checkTopic}>{checkingTopic?<Loader2 size={15} className="spin"/>:<Search size={15}/>} {checkingTopic?'주제 확인 중…':'이 주제로 시작하기'}</Button>{topicApproved&&<span className="subject-check-complete"><Check size={14}/>주제 확인 완료</span>}</div></div>
       </section>
-      {topicApproved&&<DomainBox onQueriesChange={changeQueries} queries={queries} domains={domains} disabled={pending} onChange={changeDomains} onRecommend={openDomains}/>}
+      {topicApproved&&<DomainBox searchAllDomains={searchAllDomains} onSearchScopeChange={changeSearchScope} onQueriesChange={changeQueries} queries={queries} domains={domains} disabled={pending} onChange={changeDomains} onRecommend={openDomains}/>}
       
       
       </div>
@@ -215,7 +221,7 @@ function App({user,onLogout}) {
     {checkingTopic&&<SubjectValidationStatusDialog loading/>}
     {!checkingTopic&&validationOpen&&validation&&!validation.matches.length&&<SubjectValidationStatusDialog onConfirm={continueCreation}/>}
     {!checkingTopic&&validationOpen&&validation&&validation.matches.length>0&&<SubjectValidationDialog validation={validation} pending={pending} selectedId={selectedSubscription} error={subscriptionError} onClose={()=>setValidationOpen(false)} onCreate={continueCreation} onSubscribe={subscribeToMatch}/>}
-    {modal&&<DomainRecommendationModal existingQueries={queries} sampleId={sampleRef.current?.id} saving={pending} topic={topic.trim()} existing={domains} onClose={()=>setModal(false)} onAdd={addRecommended}/>}
+    {modal&&<DomainRecommendationModal searchAllDomains={searchAllDomains} existingQueries={queries} sampleId={sampleRef.current?.id} saving={pending} topic={topic.trim()} existing={domains} onClose={()=>setModal(false)} onAdd={addRecommended}/>}
     {toast&&<div className="toast" role="status"><Check size={17}/>{toast}</div>}
   </div>;
 }

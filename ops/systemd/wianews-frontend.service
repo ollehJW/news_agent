@@ -1,0 +1,20 @@
+[Unit]
+Description=WiaNews HTTPS frontend
+After=network-online.target wianews-backend.service
+Wants=wianews-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wia/projects/wianews/frontend
+Environment=FRONTEND_PORT=9802
+Environment=BACKEND_ORIGIN=http://127.0.0.1:9801
+Environment=WIANEWS_TLS_CERT=/home/wia/.local/share/wianews/tls/fullchain.pem
+Environment=WIANEWS_TLS_KEY=/home/wia/.local/share/wianews/tls/privkey.pem
+ExecStart=/usr/bin/node /home/wia/projects/wianews/frontend/server.mjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=40
+UMask=0077
+
+[Install]
+WantedBy=default.target

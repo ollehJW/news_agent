@@ -1,4 +1,5 @@
 """User-triggered HTML newsletter delivery with durable retry protection."""
+from backend.subscriptions.members import ACCESS,MemberBody
 import base64
 import json
 import os
@@ -12,7 +13,7 @@ from email.utils import formataddr, make_msgid, formatdate
 from typing import Literal
 from dotenv import dotenv_values
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 from backend.mail.email_html import email_html
 from backend.mail.inline_images import prepare_inline_images
 from backend.core.paths import PROJECT_DIR
@@ -38,13 +39,43 @@ def init_mail_db():
                     (str(uuid.uuid4()),row['user_id'],row['request_id'],row['kind'],row['newsletter_id'],
                      json.dumps(recipients,ensure_ascii=False),row['results_json'],row['status'],row['created_at'],row['completed_at']))
             db.execute('DROP TABLE newsletter_email_requests')
+        if 'subscription_id' not in {r['name'] for r in db.execute('PRAGMA table_info(mailing)')}:
+            db.execute('ALTER TABLE mailing ADD COLUMN subscription_id TEXT REFERENCES subscriptions(subscription_id) ON DELETE RESTRICT')
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS mailing_subscription_edition ON mailing(subscription_id,newsletter_id) WHERE subscription_id IS NOT NULL')
+        for row in db.execute('SELECT mailing_id,mailing_list,results_json FROM mailing').fetchall():
+            recipients=json.loads(row['mailing_list']);results=json.loads(row['results_json'])
+            changed=False
+            for recipient in recipients+results:
+                if 'member_type' not in recipient or 'email' in recipient:
+                    recipient['member_type']='internal' if recipient.get('user_id') else 'external'
+                    recipient['email_address']=recipient.pop('email',recipient.get('email_address'))
+                    changed=True
+            if changed:
+                db.execute('UPDATE mailing SET mailing_list=?,results_json=? WHERE mailing_id=?',
+                    (json.dumps(recipients,ensure_ascii=False),json.dumps(results,ensure_ascii=False),row['mailing_id']))
+
 
 
 class SendBody(BaseModel):
+    model_config=ConfigDict(extra='forbid')
     request_id: str=Field(min_length=1,max_length=80,pattern=r'^[a-zA-Z0-9-]+$')
     kind: Literal['sample','subscription']
     newsletter_id: str=Field(min_length=1,max_length=100)
-    user_ids: list[str]=Field(min_length=1,max_length=100)
+    recipients: list[MemberBody] | None=Field(default=None,min_length=1,max_length=100)
+    user_ids: list[str] | None=Field(default=None,min_length=1,max_length=100)
+
+    @model_validator(mode='after')
+    def recipient_input(self):
+        if (self.recipients is None)==(self.user_ids is None):
+            raise ValueError('수신자 목록을 하나 지정해 주세요.')
+        return self
+
+    def members(self):
+        return self.recipients if self.recipients is not None else [MemberBody(member_type='internal',user_id=uid) for uid in self.user_ids]
+
+
+def recipient_key(recipient):
+    return (recipient.get('member_type','internal'),recipient.get('user_id') or (recipient.get('email_address') or '').strip().lower())
 
 
 def mail_settings():
@@ -62,12 +93,12 @@ def load_letter(db,body,user_id):
             WHERE sample_id=? AND user_id=? AND saved_at IS NOT NULL AND status='completed' ''',
             (body.newsletter_id,user_id)).fetchone()
     else:
-        row=db.execute('''SELECT d.topic AS title,n.html_content FROM subscripted_newsletters n
+        row=db.execute(f'''SELECT d.topic AS title,n.html_content FROM subscripted_newsletters n
             JOIN sample_details d ON d.sample_id=n.sample_id
             WHERE n.newsletter_id=? AND n.published_at IS NOT NULL AND EXISTS(
                 SELECT 1 FROM subscription_history h JOIN subscriptions s USING(subscription_id)
-                WHERE h.newsletter_id=n.newsletter_id AND s.sample_id=n.sample_id AND s.user_id=?)''',
-            (body.newsletter_id,user_id)).fetchone()
+                WHERE h.newsletter_id=n.newsletter_id AND s.sample_id=n.sample_id AND {ACCESS})''',
+            (body.newsletter_id,user_id,user_id)).fetchone()
     if not row or not row['html_content']:raise HTTPException(404,'발송할 뉴스레터를 찾을 수 없습니다.')
     return dict(row)
 
@@ -123,38 +154,42 @@ def deliver(sender,password,recipients,title,html,*,prepared=None):
 
 @router.post('')
 def send_newsletter(body: SendBody,user=Depends(tracked_member_user)):
-    ids=sorted(set(body.user_ids))
+    members={recipient_key(m.model_dump()):m for m in body.members()}
+    keys=sorted(members)
     with database() as db:
         db.execute('BEGIN IMMEDIATE')
         existing=db.execute('SELECT * FROM mailing WHERE user_id=? AND request_id=?',
             (user['user_id'],body.request_id)).fetchone()
         if existing:
-            if (existing['kind'],existing['newsletter_id'],sorted(r['user_id'] for r in json.loads(existing['mailing_list'])))!=(body.kind,body.newsletter_id,ids):
+            if (existing['kind'],existing['newsletter_id'],sorted(set(recipient_key(r) for r in json.loads(existing['mailing_list']))))!=(body.kind,body.newsletter_id,keys):
                 raise HTTPException(409,'다른 발송 요청에 사용된 ID입니다.')
             if existing['status']=='processing':raise HTTPException(409,'발송 처리 중이거나 결과를 확인 중입니다. 중복 발송하지 말고 잠시 후 확인해 주세요.')
             return {'mailing_id':existing['mailing_id'],'results':json.loads(existing['results_json'])}
         letter=load_letter(db,body,user['user_id'])
         recipients=[]
-        for uid in ids:
-            row=db.execute('SELECT user_id,full_name,email FROM users WHERE user_id=? AND is_active=1 AND is_admin=0',(uid,)).fetchone()
-            if not row or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',row['email'] or ''):
-                raise HTTPException(422,'이메일이 없거나 사용할 수 없는 수신자가 있습니다. 선택 목록을 확인해 주세요.')
-            recipients.append(dict(row))
+        for key in keys:
+            member=members[key]
+            if member.member_type=='internal':
+                row=db.execute('SELECT user_id,full_name,email FROM users WHERE user_id=? AND is_active=1 AND is_admin=0',(member.user_id,)).fetchone()
+                if not row or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',row['email'] or ''):
+                    raise HTTPException(422,'이메일이 없거나 사용할 수 없는 수신자가 있습니다. 선택 목록을 확인해 주세요.')
+                recipients.append({'member_type':'internal','user_id':row['user_id'],'name':row['full_name'],'email_address':row['email'].strip().lower()})
+            else:
+                recipients.append({'member_type':'external','user_id':None,'name':member.email_address,'email_address':member.email_address})
         sender,password=mail_settings()
         mailing_id=str(uuid.uuid4())
-        mailing_list=[{'user_id':r['user_id'],'name':r['full_name'],'email':r['email'].strip()} for r in recipients]
+        mailing_list=recipients
         db.execute("""INSERT INTO mailing (mailing_id,user_id,request_id,kind,newsletter_id,subject,sender_email,
             mailing_list,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (mailing_id,user['user_id'],body.request_id,body.kind,body.newsletter_id,
              '[WiaNews] '+' '.join(letter['title'].split()),sender,
              json.dumps(mailing_list,ensure_ascii=False),'processing',now()))
     prepared=prepare_inline_images(letter['html_content'])
-    addresses=list(dict.fromkeys(r['email'].strip().casefold() for r in recipients))
+    addresses=list(dict.fromkeys(r['email_address'].casefold() for r in recipients))
     statuses=deliver(sender,password,addresses,letter['title'],letter['html_content'],prepared=prepared)
     completed_at=now()
-    results=[{'user_id':r['user_id'],'name':r['full_name'],'email':r['email'].strip(),
-        'status':statuses[r['email'].strip().casefold()],
-        'sent_at':completed_at if statuses[r['email'].strip().casefold()]=='sent' else None,
+    results=[{**r,'status':statuses[r['email_address'].casefold()],
+        'sent_at':completed_at if statuses[r['email_address'].casefold()]=='sent' else None,
         'completed_at':completed_at} for r in recipients]
     with database() as db:
         db.execute("""UPDATE mailing SET results_json=?,sent_at=?,status='completed',completed_at=?

@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS mailing (
  mailing_id TEXT PRIMARY KEY,
  user_id TEXT REFERENCES users(user_id) ON DELETE SET NULL,
  request_id TEXT NOT NULL,
+ subscription_id TEXT REFERENCES subscriptions(subscription_id) ON DELETE RESTRICT,
  kind TEXT NOT NULL CHECK(kind IN ('sample','subscription')),
  newsletter_id TEXT NOT NULL,
  subject TEXT,

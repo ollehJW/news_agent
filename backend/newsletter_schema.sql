@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS domains (
 CREATE TABLE IF NOT EXISTS sample_newsletters (
  sample_id TEXT PRIMARY KEY,
  html_content TEXT, total_summary TEXT,
+ search_all_domains INTEGER NOT NULL DEFAULT 0 CHECK(search_all_domains IN (0,1)),
  request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL,
  created_at TEXT NOT NULL, saved_at TEXT,
  last_issued_newsletter_id TEXT REFERENCES subscripted_newsletters(newsletter_id) ON DELETE SET NULL

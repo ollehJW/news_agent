@@ -20,11 +20,11 @@ router=APIRouter(prefix='/api/subscriptions',route_class=ErrorRoute)
 
 
 def configuration(db,sample_id):
-    sample=db.execute('SELECT topic FROM sample_details WHERE sample_id=?',(sample_id,)).fetchone()
+    sample=db.execute('SELECT topic,search_all_domains FROM sample_details WHERE sample_id=?',(sample_id,)).fetchone()
     if not sample:raise HTTPException(404,'샘플을 찾을 수 없습니다.')
     queries=[dict(r) for r in db.execute('SELECT query FROM sample_queries WHERE sample_id=? ORDER BY position',(sample_id,))]
     domains=[dict(r) for r in db.execute('SELECT d.domain_id,d.host FROM sample_domains sd JOIN domains d USING(domain_id) WHERE sd.sample_id=? ORDER BY d.host',(sample_id,))]
-    return {'topic':sample['topic'],'queries':queries,'domains':domains}
+    return {'search_all_domains':bool(sample['search_all_domains']),'topic':sample['topic'],'queries':queries,'domains':domains}
 
 
 def active_subscriptions(db,sample_id):
@@ -92,6 +92,8 @@ def save_candidates(run,config,retained,request_id,counts):
         if configuration(db,run['sample_id'])!=config:raise HTTPException(409,'수집 중 주제·쿼리·도메인이 변경되었습니다.')
         if not active_subscriptions(db,run['sample_id']):raise HTTPException(409,'활성 구독이 없어 수집을 중단했습니다.')
         for article in retained:
+            from backend.news.article_repository import resolve_article_domain
+            article['domain_id']=resolve_article_domain(db,article)
             aid=str(uuid.uuid4())
             # Preserve existing article content, title, summary and evaluation on global URL matches.
             db.execute('''INSERT INTO articles
@@ -130,8 +132,8 @@ async def _collect_sample(sample_id,day,user_id):
     async def progress(*args):pass
     try:
         async with asyncio.timeout(360):
-            if not config['queries'] or not config['domains']:raise HTTPException(422,'저장된 검색 쿼리와 도메인이 필요합니다.')
-            articles,counts=await search_articles(config['queries'],config['domains'],day,day,progress)
+            if not config['queries'] or (not config['domains'] and not config['search_all_domains']):raise HTTPException(422,'저장된 검색 쿼리와 도메인이 필요합니다.')
+            articles,counts=await search_articles(config['queries'],config['domains'],day,day,progress,search_all_domains=config['search_all_domains'])
             known,history=recent_history(sample_id,run['started_at'])
             candidates,duplicates,excluded=deduplicate_urls(articles,known)
             counts['url_duplicates']+=duplicates

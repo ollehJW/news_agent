@@ -38,3 +38,5 @@
 .collection-stage-list{display:flex;justify-content:center;gap:18px;list-style:none;padding:0;margin:24px 0 0;font-size:12px;color:#78879a}.collection-stage-list li{display:flex;align-items:center;gap:6px}.collection-stage-list .active{color:#284665;font-weight:700}.collection-stage-list .done{color:#35634e}.collection-result-counts{font-size:12px;color:#53647b;margin:0 0 18px}
 
 .step-navigation-next{display:flex;align-items:center;justify-content:flex-end;gap:10px}
+
+.all-domains-option{display:flex;align-items:center;gap:12px;margin:14px 0;padding:16px;border:1px solid #cbd9e9;border-radius:10px;background:#f4f7fb;color:#233e60;text-align:left}.all-domains-option input{width:18px;height:18px;accent-color:#345f91;flex-shrink:0}.all-domains-option span{display:grid;gap:5px}.all-domains-option small{font-size:12px;line-height:1.6;color:#526780}

@@ -118,6 +118,10 @@ def init_newsletter_db():
         if 'request_id' not in sample_columns:db.execute('ALTER TABLE sample_newsletters ADD COLUMN request_id TEXT REFERENCES llm_requests(request_id) ON DELETE SET NULL')
         from backend.migrations.subscription_collection import migrate_subscription_collection
         migrate_subscription_collection(db)
+        from backend.migrations.subscription_members import migrate_subscription_members
+        migrate_subscription_members(db)
+        if 'search_all_domains' not in {r['name'] for r in db.execute('PRAGMA table_info(sample_newsletters)')}:
+            db.execute("ALTER TABLE sample_newsletters ADD COLUMN search_all_domains INTEGER NOT NULL DEFAULT 0 CHECK(search_all_domains IN (0,1))")
         if db.execute('PRAGMA foreign_key_check').fetchall():
             raise RuntimeError('Newsletter migration violated foreign key constraints')
 

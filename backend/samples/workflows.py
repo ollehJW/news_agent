@@ -142,6 +142,7 @@ class SourceInput(BaseModel):
 
 
 class SourcesBody(BaseModel):
+    search_all_domains: bool | None = None
     domains: list[SourceInput] = Field(max_length=20)
     queries: list[QueryInput] | None = Field(default=None,max_length=5)
 
@@ -159,6 +160,8 @@ def set_sources(sample_id: str, body: SourcesBody, user=Depends(member_user)):
         owned_sample(db, sample_id, user['user_id'])
         sid,_=editable_sample(db,sample_id)
         prepare_configuration(db,sid)
+        if body.search_all_domains is not None:
+            db.execute('UPDATE sample_newsletters SET search_all_domains=? WHERE sample_id=?',(body.search_all_domains,sid))
         chosen=[]
         for item in unique.values():
             did=shared_domain(db,item.host)
@@ -187,7 +190,7 @@ def set_sources(sample_id: str, body: SourcesBody, user=Depends(member_user)):
         if body.queries is not None:
             save_selected_queries(db,sid,sample_id,user['user_id'],body.queries)
         set_step(db,sid,'source_setup')
-        return {'sample_id':sid,'domains':sources(db,sid),'queries':queries_for_sample(db,sid)}
+        return {'search_all_domains':bool(db.execute('SELECT search_all_domains FROM sample_newsletters WHERE sample_id=?',(sid,)).fetchone()[0]),'sample_id':sid,'domains':sources(db,sid),'queries':queries_for_sample(db,sid)}
 
 
 class PeriodBody(BaseModel):
@@ -239,7 +242,7 @@ def newsletter_dict(db,row):
     count=db.execute('SELECT count(*) FROM sample_issues WHERE sample_id=?',(row['sample_id'],)).fetchone()[0]
     return {'id':row['sample_id'],'title':row['topic'],'html':row['html_content'],
             'date':(row['saved_at'] or row['completed_at'] or row['created_at'])[:10], 'count':count,
-            'topic':row['topic'],'total_summary':row['total_summary'],'request_id':row['request_id'],'domains':sources(db,row['sample_id']),
+            'search_all_domains':bool(row['search_all_domains']),'topic':row['topic'],'total_summary':row['total_summary'],'request_id':row['request_id'],'domains':sources(db,row['sample_id']),
             'dates':{'start':row['collection_start_date'],'end':row['collection_end_date']},'saved_at':row['saved_at']}
 
 
