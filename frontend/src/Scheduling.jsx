@@ -3,7 +3,7 @@ import SubscriptionStatusDialog from './SubscriptionStatusDialog';
 import SubscriptionCancelDialog from './SubscriptionCancelDialog';
 import RecipientSearchDialog from './RecipientSearchDialog';
 import './subscription-members.css';
-import SubscriptionMarketplace from './SubscriptionMarketplace';
+import SubscriptionMarketplace, { SourceDialog } from './SubscriptionMarketplace';
 import { authRequest, postAuth } from './authApi';
 import { CalendarClock, Plus, Clock3, FileText, Pencil, Trash2, X, RotateCcw, Search } from 'lucide-react';
 import { PUBLISH_TIME, DAYS, koreaDate, validateSchedule, nextOccurrence, formatOccurrence, frequencyLabel } from './schedules';
@@ -11,6 +11,7 @@ import { PUBLISH_TIME, DAYS, koreaDate, validateSchedule, nextOccurrence, format
 export default function Scheduling({ newsletters, notify, user }) {
   const [schedules,setSchedules]=useState([]);
   const [marketplace,setMarketplace]=useState([]);
+  const [conditions,setConditions]=useState(null);
   const [loading,setLoading]=useState(true);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
@@ -87,11 +88,12 @@ export default function Scheduling({ newsletters, notify, user }) {
         <div className="schedule-toolbar"><div className="schedule-filters">{[['all','전체'],['active','구독 중'],['paused','일시정지']].map(([key,label])=><button key={key} className={filter===key?'active':''} onClick={()=>setFilter(key)}>{label}</button>)}</div><label className="schedule-search"><Search size={15}/><input aria-label="구독 검색" placeholder="구독 또는 뉴스레터 검색" value={query} onChange={e=>setQuery(e.target.value)}/></label></div>
         {visible.length?<div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>구독 / 뉴스레터</th><th>발행 주기</th><th>다음 발행 예정 <small>KST</small></th><th>구독 상태</th><th>관리</th></tr></thead><tbody>{visible.map(item=>{
           const newsletter=available.get(item.newsletterId);
-          return <tr key={item.id}><td><strong>{item.name}</strong><span className={!newsletter?'missing-newsletter':''}><FileText size={12}/>{newsletter?.title||'원본 뉴스레터를 찾을 수 없습니다'}</span></td><td><b>{frequencyLabel(item)}</b><small>오전 8시 · KST</small></td><td className="next-occurrence">{!newsletter?'원본 확인 필요':item.active?formatOccurrence(nextOccurrence(item,now)):'일시정지'}</td><td><button className="schedule-switch" role="switch" aria-checked={item.active} aria-label={`${item.name} 구독 상태`} disabled={busy||!newsletter||!item.members?.length} onClick={()=>setStatusTarget(item)}><span/></button></td><td>{item.can_manage===false?<button className="subscription-leave" disabled={busy} aria-label={`${item.name} 구독 해제`} title="본인만 수신 멤버에서 제외됩니다" onClick={()=>leave(item)}>구독 해제</button>:<div className="schedule-row-actions"><button className="icon-button" disabled={busy} aria-label={`${item.name} 수정`} onClick={()=>setEditor(item)}><Pencil size={15}/></button><button className="icon-button" disabled={busy} aria-label={`${item.name} 구독 취소`} onClick={()=>setCancelTarget(item)}><Trash2 size={15}/></button></div>}</td></tr>;
+          return <tr key={item.id}><td><strong>{item.name}</strong><span className={!newsletter?'missing-newsletter':''}><FileText size={12}/>{newsletter?.title||'원본 뉴스레터를 찾을 수 없습니다'}</span></td><td><b>{frequencyLabel(item)}</b><small>오전 8시 · KST</small></td><td className="next-occurrence">{!newsletter?'원본 확인 필요':item.active?formatOccurrence(nextOccurrence(item,now)):'일시정지'}</td><td><button className="schedule-switch" role="switch" aria-checked={item.active} aria-label={`${item.name} 구독 상태`} disabled={busy||!newsletter||!item.members?.length} onClick={()=>setStatusTarget(item)}><span/></button></td><td><div className="schedule-row-actions"><button className="icon-button" disabled={!item.newsletter} title="수집 조건" aria-label={`${item.name} 수집 조건 보기`} onClick={()=>setConditions(item.newsletter)}><Search size={15}/></button>{item.can_manage===false?<button className="subscription-leave" disabled={busy} aria-label={`${item.name} 구독 해제`} title="본인만 수신 멤버에서 제외됩니다" onClick={()=>leave(item)}>구독 해제</button>:<div className="schedule-row-actions"><button className="icon-button" disabled={busy} aria-label={`${item.name} 수정`} onClick={()=>setEditor(item)}><Pencil size={15}/></button><button className="icon-button" disabled={busy} aria-label={`${item.name} 구독 취소`} onClick={()=>setCancelTarget(item)}><Trash2 size={15}/></button></div>}</div></td></tr>;
         })}</tbody></table></div>:<div className="empty schedule-empty"><CalendarClock size={33}/><h3>{schedules.length?'조건에 맞는 구독이 없어요':'첫 번째 뉴스레터를 구독해 보세요'}</h3><p>{schedules.length?'검색어나 상태 필터를 변경해 주세요.':'뉴스레터와 반복 주기를 선택하면 예정 일정을 확인할 수 있어요.'}</p>{!schedules.length&&<button className="button" disabled={busy||loading} onClick={()=>setEditor({})}><Plus size={15}/>구독 추가</button>}</div>}
       </>}
       <div className="schedule-list-footer"><span>저장된 뉴스레터 {newsletters.length}개 · 발행일 오전 8시 자동 발송</span></div>
     </section>
+    {conditions&&<SourceDialog item={conditions} onClose={()=>setConditions(null)}/>}
     <SubscriptionMarketplace items={marketplace} loading={loading} busy={busy} onSubscribe={subscribe}/>
     {statusTarget&&<SubscriptionStatusDialog item={statusTarget} busy={busy} onClose={()=>{if(!busy)setStatusTarget(null);}} onConfirm={changeMemberStatus}/>}
     {cancelTarget&&<SubscriptionCancelDialog item={cancelTarget} busy={busy} onClose={()=>{if(!busy)setCancelTarget(null);}} onConfirm={cancelMembers}/>}

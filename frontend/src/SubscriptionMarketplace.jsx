@@ -31,7 +31,7 @@ export default function SubscriptionMarketplace({ items = [], loading = false, p
         <div className="marketplace-headline"><h3 title={item.topic}>{item.topic}</h3></div>
         <div className="marketplace-start-date"><span>발행 시작일</span><span>{publicationStart(item.first_published_at)}</span></div>
         <div className="marketplace-publish-options marketplace-issued-count">총 <strong>{item.published_count??0}호</strong> 발행</div>
-        <div className="marketplace-details"><button className="marketplace-preview-button" aria-label={`${item.topic} 미리 보기`} aria-haspopup="dialog" onClick={()=>setPreview(item)}><Eye size={14}/>미리 보기</button><button className="marketplace-sources-button" aria-label={`${item.topic} 수집 출처 보기`} aria-haspopup="dialog" onClick={()=>setSources(item)}>수집 출처<Search size={14}/></button></div>
+        <div className="marketplace-details"><button className="marketplace-preview-button" aria-label={`${item.topic} 미리 보기`} aria-haspopup="dialog" onClick={()=>setPreview(item)}><Eye size={14}/>미리 보기</button><button className="marketplace-sources-button" aria-label={`${item.topic} 수집 조건 보기`} aria-haspopup="dialog" onClick={()=>setSources(item)}>수집 조건<Search size={14}/></button></div>
       </div>
       <footer className="marketplace-card-footer">
         <button className={`button ${item.subscribed?'':'primary'}`} disabled={item.subscribed||busy||pendingId!==null} onClick={()=>onSubscribe?.(item)}>{pendingId===item.id?<Loader2 size={14} className="spin"/>:item.subscribed?<Check size={14}/>:<Plus size={14}/>} {item.subscribed?'내 구독에 있음':'구독하기'}</button>
@@ -45,10 +45,22 @@ export default function SubscriptionMarketplace({ items = [], loading = false, p
 
 export function SourceDialog({item,onClose}) {
   const dialog=useRef(null);
+  const [data,setData]=useState(null),[error,setError]=useState(''),[attempt,setAttempt]=useState(0);
+  const id=item.sample_id||item.id;
   useEffect(()=>{const previous=document.activeElement;dialog.current.showModal();return()=>previous?.focus();},[]);
-  return <dialog ref={dialog} className="marketplace-sources-dialog" aria-labelledby="marketplace-sources-title" onCancel={e=>{e.preventDefault();onClose();}} onClick={e=>{if(e.target===dialog.current)onClose();}}>
-    <div className="marketplace-sources-header"><div><h3 id="marketplace-sources-title">수집 출처 <span>{item.domains?.length||0}</span></h3><p>{item.topic}</p></div><button className="icon-button" aria-label="수집 출처 닫기" onClick={onClose}><X size={19}/></button></div>
-    {item.search_all_domains?<p className="marketplace-no-sources">전체 도메인 검색 · 특정 사이트로 제한하지 않습니다.</p>:item.domains?.length?<ul className="marketplace-sources-list">{item.domains.map(host=><li key={host}><a href={`https://${host}`} target="_blank" rel="noopener noreferrer"><span>{host}</span><ExternalLink size={14} aria-hidden="true"/></a></li>)}</ul>:<p className="marketplace-no-sources">등록된 수집 출처가 없습니다.</p>}
+  useEffect(()=>{
+    const controller=new AbortController();setData(null);setError('');
+    authRequest(`/subscriptions/marketplace/${encodeURIComponent(id)}/conditions`,{signal:controller.signal})
+      .then(result=>{if(!controller.signal.aborted)setData(result);})
+      .catch(err=>{if(!controller.signal.aborted)setError(err.message);});
+    return()=>controller.abort();
+  },[id,attempt]);
+  return <dialog ref={dialog} className="marketplace-sources-dialog collection-conditions-dialog" aria-labelledby="marketplace-sources-title" onCancel={e=>{e.preventDefault();onClose();}} onClick={e=>{if(e.target===dialog.current)onClose();}}>
+    <div className="marketplace-sources-header"><div><h3 id="marketplace-sources-title">수집 조건</h3><p>{item.topic||item.title}</p></div><button className="icon-button" aria-label="수집 조건 닫기" onClick={onClose}><X size={19}/></button></div>
+    {error?<div className="marketplace-preview-state" role="alert"><p>{error}</p><button className="button" onClick={()=>setAttempt(n=>n+1)}>다시 불러오기</button></div>:!data?<div className="marketplace-preview-state" role="status"><Loader2 size={22} className="spin"/><p>수집 조건을 불러오는 중입니다.</p></div>:<div className="collection-conditions-body">
+      <section><h4><Search size={15}/>검색 쿼리 <span>{data.queries?.length||0}개</span></h4>{data.queries?.length?<ol className="conditions-query-list">{data.queries.map((query,index)=><li key={index}>{query}</li>)}</ol>:<p className="hint">등록된 검색 쿼리가 없습니다.</p>}</section>
+      <section><h4><Layers3 size={15}/>수집 도메인 <span>{data.search_all_domains?'전체':`${data.domains?.length||0}개`}</span></h4>{data.search_all_domains?<p className="conditions-all-domains">전체 도메인 검색 · 특정 사이트로 제한하지 않습니다.</p>:data.domains?.length?<ul className="marketplace-sources-list">{data.domains.map(host=><li key={host}><a href={`https://${host}`} target="_blank" rel="noopener noreferrer"><span>{host}</span><ExternalLink size={14} aria-hidden="true"/></a></li>)}</ul>:<p className="hint">등록된 수집 도메인이 없습니다.</p>}</section>
+    </div>}
   </dialog>;
 }
 

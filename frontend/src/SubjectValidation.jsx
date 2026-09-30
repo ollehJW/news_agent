@@ -15,7 +15,7 @@ export default function SubjectValidationDialog({ validation, pending, selectedI
       <div className="subject-match-reason"><span><Sparkles size={13}/>이 주제와 비슷해요</span><p>{item.reason}</p></div>
       <div className="subject-match-actions">
         <button className="button" disabled={pending} aria-haspopup="dialog" aria-label={`${item.topic} 미리보기`} onClick={()=>setPreview({...item,id:item.sample_id})}><Eye size={14}/>미리보기</button>
-        <button className="button" disabled={pending} aria-haspopup="dialog" aria-label={`${item.topic} 수집 출처`} onClick={()=>setSources(item)}><Search size={14}/>수집 출처</button>
+        <button className="button" disabled={pending} aria-haspopup="dialog" aria-label={`${item.topic} 수집 조건`} onClick={()=>setSources(item)}><Search size={14}/>수집 조건</button>
         <button className="button primary" disabled={pending} onClick={()=>onSubscribe(item)}>{pending&&selectedId===item.sample_id?<Loader2 size={14} className="spin"/>:<ArrowRight size={14}/>}바로 구독</button>
       </div>
     </article>)}</div>

@@ -36,7 +36,7 @@ def sample_info(db,sample_id):
     domains=[r[0] for r in db.execute('SELECT d.host FROM sample_domains sd JOIN domains d USING(domain_id) WHERE sd.sample_id=? ORDER BY d.host',(sample_id,))]
     count=db.execute('SELECT count(*) FROM sample_issues WHERE sample_id=?',(sample_id,)).fetchone()[0]
     return {'id':sample_id,'title':row['topic'],'topic':row['topic'],'date':(row['saved_at'] or row['completed_at'] or row['created_at'])[:10],
-            'count':count,'domains':domains,'search_all_domains':bool(row['search_all_domains'])}
+            'queries':[r[0] for r in db.execute('SELECT query FROM sample_queries WHERE sample_id=? ORDER BY position',(sample_id,))],'count':count,'domains':domains,'search_all_domains':bool(row['search_all_domains'])}
 
 
 class StatusBody(BaseModel):
@@ -215,6 +215,14 @@ def archived_newsletter(newsletter_id: str,response: Response,user=Depends(membe
             (newsletter_id,user['user_id'],user['user_id'])).fetchone()
         if not row: raise HTTPException(404,'전달받은 뉴스레터를 찾을 수 없습니다.')
         return dict(row)
+
+
+@router.get('/marketplace/{sample_id}/conditions')
+def collection_conditions(sample_id: str,response: Response,user=Depends(member_user)):
+    response.headers['Cache-Control']='no-store'
+    with database() as db:
+        subscribable_sample(db,sample_id,user['user_id'])
+        return sample_info(db,sample_id)
 
 
 @router.get('/marketplace/{sample_id}/preview')
