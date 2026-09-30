@@ -189,7 +189,7 @@ function App({user,onLogout}) {
     <main>
       <div className="page-heading"><div><div className="eyebrow">YOUR WEEKLY TECH INTELLIGENCE</div><h1>{view==='schedules'?'구독 관리':view==='archive'?'뉴스레터 보관함':'기술의 흐름을, 한눈에.'}</h1><p>{view==='schedules'?'관심 있는 뉴스레터를 구독하고, 원하는 발행 주기를 설정하세요.':view==='archive'?'직접 만든 샘플과 구독으로 받아본 뉴스레터를 확인하세요.':'관심 있는 주제 하나를 알려주세요. 꼭 알아야 할 기술 소식을 Agent가 정리합니다.'}</p></div></div>
       {error&&<p className="error" role="alert">{error}</p>}
-      {view==='schedules'?<Scheduling user={user} newsletters={saved} notify={setToast}/>:view==='archive'? <NewsletterArchive samples={saved} onCreate={reset} onDownload={download} pending={pending}/>:<>
+      {view==='schedules'?<Scheduling user={user} newsletters={saved} notify={setToast}/>:view==='archive'? <NewsletterArchive samples={saved} onSamplesChange={setSaved} onCreate={reset} onDownload={download} pending={pending}/>:<>
       <div className="stepper">{steps.map((s,i)=><React.Fragment key={s}><div className={`step ${step===i?'active':''} ${step>i?'done':''}`}><span>{step>i?<Check size={15}/>:String(i+1).padStart(2,'0')}</span><div><small>STEP {i+1}</small><b>{s}</b></div></div>{i<3&&<div className="step-line"/>}</React.Fragment>)}</div>
       <div className="setup-grid studio-grid"><div className="studio-content">{step===0?<div className="setup-main"><section className="panel keyword-panel topic-panel"><div className="section-title"><div className="section-label"><span className="tile-icon"><Hash size={20}/></span><div><h2>어떤 주제를 살펴볼까요?</h2><p>뉴스레터로 받아보고 싶은 주제 하나를 입력해 주세요.</p></div></div></div>
         <label className="field-label" htmlFor="topic-input">뉴스레터 주제 <span>{topic.length}/120자</span></label>

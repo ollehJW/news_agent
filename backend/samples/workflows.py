@@ -238,9 +238,20 @@ def set_selection(sample_id: str, body: SelectionBody, user=Depends(member_user)
         return {'sample_id':sid,'selected_ids':chosen,'issues':issue_rows(db,sid)}
 
 
+def sample_subscription_info(db,sample_id):
+    linked=db.execute("SELECT 1 FROM subscriptions WHERE sample_id=? AND status!='cancelled' LIMIT 1",(sample_id,)).fetchone() is not None
+    count=db.execute("""SELECT count(DISTINCT lower(trim(CASE WHEN m.member_type='internal' THEN u.email ELSE m.email_address END)))
+        FROM subscriptions s JOIN subscription_members m USING(subscription_id)
+        LEFT JOIN users u ON u.user_id=m.user_id
+        WHERE s.sample_id=? AND s.status='active' AND m.status='active'
+        AND (m.member_type='external' OR (u.is_active=1 AND u.is_admin=0))
+        AND trim(COALESCE(u.email,m.email_address,''))!=''""",(sample_id,)).fetchone()[0]
+    return {'subscriber_count':count,'has_subscriptions':linked,'can_delete':not linked}
+
+
 def newsletter_dict(db,row):
     count=db.execute('SELECT count(*) FROM sample_issues WHERE sample_id=?',(row['sample_id'],)).fetchone()[0]
-    return {'id':row['sample_id'],'title':row['topic'],'html':row['html_content'],
+    return {**sample_subscription_info(db,row['sample_id']),'id':row['sample_id'],'title':row['topic'],'html':row['html_content'],
             'date':(row['saved_at'] or row['completed_at'] or row['created_at'])[:10], 'count':count,
             'search_all_domains':bool(row['search_all_domains']),'topic':row['topic'],'total_summary':row['total_summary'],'request_id':row['request_id'],'domains':sources(db,row['sample_id']),
             'dates':{'start':row['collection_start_date'],'end':row['collection_end_date']},'saved_at':row['saved_at']}
@@ -337,3 +348,15 @@ def llm_usage(user=Depends(member_user)):
 def list_errors(user=Depends(member_user)):
     with database() as db:
         return [dict(r) for r in db.execute('SELECT * FROM errors WHERE user_id=? ORDER BY created_at DESC,error_id DESC',(user['user_id'],))]
+
+
+@router.delete('/newsletters/{sample_id}')
+def remove_saved_newsletter(sample_id: str,user=Depends(member_user)):
+    with database() as db:
+        db.execute('BEGIN IMMEDIATE')
+        owned_newsletter(db,sample_id,user['user_id'])
+        if not sample_subscription_info(db,sample_id)['can_delete']:
+            raise HTTPException(409,'연결된 구독이 있어 삭제할 수 없습니다. 일시정지된 구독도 먼저 해제해 주세요.')
+        # Remove from the owner's archive; preserve past mailing and publication references.
+        db.execute('UPDATE sample_newsletters SET saved_at=NULL WHERE sample_id=?',(sample_id,))
+        return {'sample_id':sample_id,'removed':True}
