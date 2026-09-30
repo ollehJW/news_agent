@@ -1,3 +1,4 @@
+from backend.admin.dashboard import router as admin_router, init_admin_db
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -28,6 +29,7 @@ async def lifespan(app):
     init_newsletter_db()
     init_mail_db()
     init_publication_db()
+    init_admin_db()
     scheduler=start_scheduler()
     publisher=start_publication_scheduler()
     try:
@@ -41,6 +43,7 @@ async def lifespan(app):
 app = FastAPI(title='WiaNews API', version='0.2.0', lifespan=lifespan)
 app.router.route_class = ErrorRoute
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(mail_router)
 app.include_router(workflow_router)
 app.include_router(subscriptions_router)

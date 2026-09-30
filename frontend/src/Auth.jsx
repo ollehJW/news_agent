@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Layers3, ArrowRight, LockKeyhole, LogOut, Loader2, ShieldCheck } from 'lucide-react';
 import { authRequest, postAuth } from './authApi';
-import AccountManagement from './AccountManagement';
+import AdminWorkspace from './AdminWorkspace';
 import './auth.css';
 
 function Brand() { return <div className="auth-brand"><Layers3 size={31}/><span>WiaNews<small>TECH INTELLIGENCE</small></span></div>; }
@@ -53,5 +53,5 @@ export default function AuthGate({children}) {
   if(loading)return <div className="auth-page"><Loader2 className="spin" size={32}/><span>로그인 확인 중</span></div>;
   if(!user)return <Login notice={notice} onLogin={value=>{setUser(value);setNotice('');}}/>;
   if(user.must_change_password)return <PasswordChange key={user.user_id} notice={notice} user={user} onChanged={setUser} onLogout={logout}/>;
-  return <>{notice&&<div className="auth-global-error" role="alert">{notice}</div>}{user.is_admin?<AccountManagement user={user} onLogout={logout}/>:children(user,logout)}</>;
+  return <>{notice&&<div className="auth-global-error" role="alert">{notice}</div>}{user.is_admin?<AdminWorkspace user={user} onLogout={logout}/>:children(user,logout)}</>;
 }
