@@ -34,3 +34,5 @@
 .archive-row>.archive-row-actions{flex:0 0 auto;display:flex;align-items:center;gap:8px}
 
 .archive-subscriber-count{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;margin-right:4px;padding:4px 8px;border-radius:6px;background:#edf3fc;color:#305782;font-size:12px;font-weight:600}.archive-delete-button:hover:not(:disabled){border-color:#e4b8b8;background:#fff3f3;color:#aa3434}
+
+.archive-scroll-list{max-height:560px;overflow-y:auto;overscroll-behavior-y:contain;scrollbar-gutter:stable;border:1px solid #e2e9f2;border-radius:10px;scrollbar-width:thin;scrollbar-color:#b4c4d7 #f4f7fb}.archive-scroll-list:focus-visible{outline:2px solid #7299c5;outline-offset:3px}.archive-scroll-list>.archive-row{padding:18px 16px}.archive-scroll-list>.archive-row:first-child{border-top:0}.archive-scroll-list::-webkit-scrollbar{width:8px}.archive-scroll-list::-webkit-scrollbar-track{background:#f4f7fb}.archive-scroll-list::-webkit-scrollbar-thumb{background:#b4c4d7;border-radius:8px;border:2px solid #f4f7fb}
