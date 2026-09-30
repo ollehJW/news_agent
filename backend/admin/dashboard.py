@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from backend.core.auth import admin_user, database, now
+from backend.integrations.exa_usage import init_exa_usage, search_count
 
 router = APIRouter(prefix='/api/admin', dependencies=[Depends(admin_user)])
 KST = ZoneInfo('Asia/Seoul')
@@ -14,6 +15,7 @@ KST = ZoneInfo('Asia/Seoul')
 def init_admin_db():
     from backend.subscriptions.usage import init_subscription_usage
     init_subscription_usage()
+    init_exa_usage()
     with database() as db:
         db.execute('''CREATE TABLE IF NOT EXISTS llm_pricing (
             provider TEXT NOT NULL, model TEXT NOT NULL,
@@ -122,6 +124,7 @@ def tokens(start: date, end: date, user_id: str = '', step: str = '', model: str
             if not selected: raise HTTPException(404,'활성 구독을 찾을 수 없습니다.')
             clauses.append('EXISTS(SELECT 1 FROM subscription_llm_requests sl WHERE sl.request_id=l.request_id AND sl.sample_id=?)')
             args.append(selected['sample_id'])
+        exa_results=search_count(db,bounds,user_id,selected['sample_id'] if subscription_id else None)
         requests=rows(db,'''SELECT l.*,u.full_name,u.employee_id,
             (SELECT sample_id FROM subscription_llm_requests sl WHERE sl.request_id=l.request_id) AS subscription_sample_id,
             EXISTS(SELECT 1 FROM errors e WHERE e.request_id=l.request_id) AS has_error
@@ -145,4 +148,4 @@ def tokens(start: date, end: date, user_id: str = '', step: str = '', model: str
     grouped['subscriptions']=[dict(key=sub['subscription_id'],label=f"{sub['name']} · {sub['owner_name']}",
         **tally([r for r in requests if r['subscription_sample_id']==sub['sample_id']]))
         for sub in options['subscriptions'] if not subscription_id or sub['subscription_id']==subscription_id]
-    return dict(unlinked_subscription_calls=sum(r['step'].startswith('subscription_') and not r['subscription_sample_id'] for r in requests),summary=tally(requests),groups=grouped,requests=requests[offset:offset+50],offset=offset,options=options,prices=prices)
+    return dict(exa_search_results=exa_results,unlinked_subscription_calls=sum(r['step'].startswith('subscription_') and not r['subscription_sample_id'] for r in requests),summary=tally(requests),groups=grouped,requests=requests[offset:offset+50],offset=offset,options=options,prices=prices)

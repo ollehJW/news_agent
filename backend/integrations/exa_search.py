@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import HTTPException
 from backend.news.article_images import article_image_url
+from backend.integrations.exa_usage import record_results
 
 KST = ZoneInfo('Asia/Seoul')
 
@@ -77,6 +78,7 @@ async def search_articles(queries,domains,start,end,on_progress,*,search_all_dom
                         data=res.json();results=data['results']
                         if not isinstance(results,list) or any(not isinstance(r,dict) for r in results):raise ValueError()
                     except (ValueError,KeyError,TypeError):raise HTTPException(502,'Exa 검색 결과 형식이 올바르지 않습니다.') from None
+                    record_results(len(results))
                     done+=1;await on_progress(0,f'검색 쿼리 {done}/{len(queries)}개 수집 완료')
                     return results[:10]
         tasks=[asyncio.create_task(search(q)) for q in queries]
