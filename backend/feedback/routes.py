@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Literal
 from jinja2 import Environment,FileSystemLoader,select_autoescape
 from fastapi import APIRouter,Depends,HTTPException,Query
-from pydantic import BaseModel,ConfigDict,Field,field_validator
+from pydantic import BaseModel,ConfigDict,Field,field_validator,model_validator
 from backend.core.auth import database,now,admin_user,member_user
 from backend.subscriptions.members import ACCESS
 from backend.subscriptions.subscriptions import sample_info
 from backend.mail import delivery
+from backend.admin.subscriptions import SourceConditions,PublicationUpdate,detail as subscription_detail,update_publication_in_db
 
 router=APIRouter(prefix='/api')
 templates=Environment(loader=FileSystemLoader(Path(__file__).resolve().parents[1]/'template'),autoescape=select_autoescape(['html']))
@@ -93,12 +94,23 @@ def list_feedback(status: Literal['all','pending','held','completed']='all',offs
     return dict(items=items,total=total,counts=counts)
 
 
+class SourceEdit(SourceConditions):
+    revision: str=Field(min_length=64,max_length=64)
+
+
 class DecisionBody(BaseModel):
     model_config=ConfigDict(extra='forbid')
     request_id: UUID
     revision: int=Field(ge=0,strict=True)
     status: Literal['completed','held']
     response: str=Field(min_length=1,max_length=3000)
+    sources: SourceEdit | None=None
+
+    @model_validator(mode='after')
+    def sources_required(self):
+        if self.status=='completed' and self.sources is None:raise ValueError('반영할 쿼리·도메인을 확인해 주세요.')
+        if self.status=='held' and self.sources is not None:raise ValueError('보류 시 수집 조건은 변경할 수 없습니다.')
+        return self
 
     @field_validator('response')
     @classmethod
@@ -111,7 +123,7 @@ def send_notification(fid,event_id):
     with database() as db:
         row=unpack(db.execute('SELECT * FROM subscription_feedback WHERE feedback_id=?',(fid,)).fetchone())
     event=next(e for e in row['notifications'] if e['id']==event_id)
-    label='처리 완료' if event['status']=='completed' else '보류'
+    label='반영' if event['status']=='completed' else '보류'
     outcome='failed'
     try:
         sender,password=delivery.mail_settings()
@@ -143,13 +155,23 @@ def decide(fid: str,body: DecisionBody,user=Depends(admin_user)):
         events=json.loads(row['notifications_json'])
         prior=next((e for e in events if e['id']==event_id),None)
         if prior:
-            if prior['status']!=body.status or prior['response']!=body.response:raise HTTPException(409,'이미 사용된 처리 요청입니다.')
+            if prior['status']!=body.status or prior['response']!=body.response or prior.get('source_input')!=(body.sources.model_dump() if body.sources else None):raise HTTPException(409,'이미 사용된 처리 요청입니다.')
             return unpack(row)
         if any(e['mail_status']=='processing' for e in events):raise HTTPException(409,'처리 결과 메일을 발송 중입니다. 잠시 후 새로고침해 주세요.')
         if row['revision']!=body.revision:raise HTTPException(409,'다른 관리자가 처리한 요청입니다. 새로고침 후 확인해 주세요.')
-        if row['status']=='completed':raise HTTPException(409,'이미 처리 완료된 피드백입니다.')
+        if row['status']=='completed':raise HTTPException(409,'이미 반영된 피드백입니다.')
+        changes={}
+        if body.status=='completed':
+            if not row['subscription_id']:raise HTTPException(409,'원본 구독이 없어 반영할 수 없습니다.')
+            current=subscription_detail(db,row['subscription_id'])
+            if current['sample_id']!=row['sample_id']:raise HTTPException(409,'피드백의 원본 샘플과 구독이 일치하지 않습니다.')
+            settings=PublicationUpdate(name=current['name'],frequency=current['frequency'],weekdays=current['weekdays'],
+                month_day=current['monthDay'],start_date=current['startDate'] or current['created_at'][:10],**body.sources.model_dump())
+            saved=update_publication_in_db(db,row['subscription_id'],settings)
+            changes={key:{k:value[k] for k in ('queries','domains','search_all_domains')}
+                for key,value in [('before',current),('after',saved)]}
         stamp=now()
-        events.append(dict(id=event_id,status=body.status,response=body.response,email=row['requester_email'],handled_by=user['user_id'],handled_at=stamp,mail_status='processing',mail_completed_at=None))
+        events.append(dict(id=event_id,status=body.status,response=body.response,email=row['requester_email'],handled_by=user['user_id'],handled_at=stamp,mail_status='processing',mail_completed_at=None,source_input=body.sources.model_dump() if body.sources else None,source_changes=changes))
         db.execute('''UPDATE subscription_feedback SET status=?,response=?,handled_by=?,handled_at=?,revision=revision+1,notifications_json=? WHERE feedback_id=?''',
             (body.status,body.response,user['user_id'],stamp,json.dumps(events,ensure_ascii=False),fid))
     return send_notification(fid,event_id)

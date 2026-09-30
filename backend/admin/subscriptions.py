@@ -104,8 +104,8 @@ def update_members(sid: str,body: MembersUpdate):
         return detail(db,sid)
 
 
-class PublicationUpdate(SettingsBody):
-    revision: str=Field(min_length=64,max_length=64)
+class SourceConditions(BaseModel):
+    model_config=ConfigDict(extra='forbid')
     queries: list[str]=Field(min_length=1,max_length=5)
     domains: list[str]=Field(default_factory=list,max_length=100)
     search_all_domains: StrictBool=False
@@ -127,8 +127,16 @@ class PublicationUpdate(SettingsBody):
 
     @model_validator(mode='after')
     def conditions(self):
-        if self.members is not None:raise ValueError('구독자는 구독자 관리에서 수정해 주세요.')
         if not self.search_all_domains and not self.domains:raise ValueError('도메인을 추가하거나 전체 도메인 검색을 선택해 주세요.')
+        return self
+
+
+class PublicationUpdate(SettingsBody,SourceConditions):
+    revision: str=Field(min_length=64,max_length=64)
+
+    @model_validator(mode='after')
+    def separate_members(self):
+        if self.members is not None:raise ValueError('구독자는 구독자 관리에서 수정해 주세요.')
         return self
 
 
@@ -136,32 +144,35 @@ class PublicationUpdate(SettingsBody):
 def update_publication(sid: str,body: PublicationUpdate):
     with database() as db:
         db.execute('BEGIN IMMEDIATE')
-        current=detail(db,sid);check_revision(current,body.revision);sample_id=current['sample_id']
-        sources_changed=(current['queries']!=body.queries or current['domains']!=body.domains or current['search_all_domains']!=body.search_all_domains)
-        if db.execute("SELECT 1 FROM subscription_publication_jobs WHERE subscription_id=? AND status='running'",(sid,)).fetchone():
-            raise HTTPException(409,'발행 중인 구독은 발행 완료 후 수정해 주세요.')
-        if sources_changed and (db.execute("SELECT 1 FROM subscription_collection_runs WHERE sample_id=? AND status='running'",(sample_id,)).fetchone() or
-            db.execute("SELECT 1 FROM subscription_publication_jobs j JOIN subscriptions s USING(subscription_id) WHERE s.sample_id=? AND j.status='running'",(sample_id,)).fetchone()):
-            raise HTTPException(409,'같은 샘플의 수집 또는 발행이 진행 중입니다. 완료 후 수정해 주세요.')
-        write_settings(db,sid,body)
-        if sources_changed:
-            existing={r['query'].casefold():dict(r) for r in db.execute('SELECT * FROM sample_queries WHERE sample_id=?',(sample_id,))}
-            db.execute('DELETE FROM sample_queries WHERE sample_id=?',(sample_id,))
-            for pos,query in enumerate(body.queries,1):
-                old=existing.get(query.casefold(),{})
-                db.execute('INSERT INTO sample_queries(query_id,sample_id,request_id,query,position,created_at) VALUES(?,?,?,?,?,?)',
-                    (old.get('query_id',str(uuid.uuid4())),sample_id,old.get('request_id'),query,pos,old.get('created_at',now())))
-            domain_ids=[]
-            for host in body.domains:
-                db.execute('INSERT INTO domains(domain_id,host,created_at) VALUES(?,?,?) ON CONFLICT(host) DO NOTHING',(str(uuid.uuid4()),host,now()))
-                did=db.execute('SELECT domain_id FROM domains WHERE host=?',(host,)).fetchone()[0];domain_ids.append(did)
-                db.execute("INSERT OR IGNORE INTO sample_domains(sample_id,domain_id,kind,created_at) VALUES(?,?,'manual',?)",(sample_id,did,now()))
-            for row in db.execute('SELECT domain_id FROM sample_domains WHERE sample_id=?',(sample_id,)).fetchall():
-                if row[0] not in domain_ids:db.execute('DELETE FROM sample_domains WHERE sample_id=? AND domain_id=?',(sample_id,row[0]))
-            db.execute('UPDATE sample_newsletters SET search_all_domains=? WHERE sample_id=?',(body.search_all_domains,sample_id))
-        db.execute('UPDATE subscriptions SET updated_at=? WHERE subscription_id=?',(now(),sid))
-        return detail(db,sid)
+        return update_publication_in_db(db,sid,body)
 
+
+def update_publication_in_db(db,sid,body):
+    current=detail(db,sid);check_revision(current,body.revision);sample_id=current['sample_id']
+    sources_changed=(current['queries']!=body.queries or current['domains']!=body.domains or current['search_all_domains']!=body.search_all_domains)
+    if db.execute("SELECT 1 FROM subscription_publication_jobs WHERE subscription_id=? AND status='running'",(sid,)).fetchone():
+        raise HTTPException(409,'발행 중인 구독은 발행 완료 후 수정해 주세요.')
+    if sources_changed and (db.execute("SELECT 1 FROM subscription_collection_runs WHERE sample_id=? AND status='running'",(sample_id,)).fetchone() or
+        db.execute("SELECT 1 FROM subscription_publication_jobs j JOIN subscriptions s USING(subscription_id) WHERE s.sample_id=? AND j.status='running'",(sample_id,)).fetchone()):
+        raise HTTPException(409,'같은 샘플의 수집 또는 발행이 진행 중입니다. 완료 후 수정해 주세요.')
+    write_settings(db,sid,body)
+    if sources_changed:
+        existing={r['query'].casefold():dict(r) for r in db.execute('SELECT * FROM sample_queries WHERE sample_id=?',(sample_id,))}
+        db.execute('DELETE FROM sample_queries WHERE sample_id=?',(sample_id,))
+        for pos,query in enumerate(body.queries,1):
+            old=existing.get(query.casefold(),{})
+            db.execute('INSERT INTO sample_queries(query_id,sample_id,request_id,query,position,created_at) VALUES(?,?,?,?,?,?)',
+                (old.get('query_id',str(uuid.uuid4())),sample_id,old.get('request_id'),query,pos,old.get('created_at',now())))
+        domain_ids=[]
+        for host in body.domains:
+            db.execute('INSERT INTO domains(domain_id,host,created_at) VALUES(?,?,?) ON CONFLICT(host) DO NOTHING',(str(uuid.uuid4()),host,now()))
+            did=db.execute('SELECT domain_id FROM domains WHERE host=?',(host,)).fetchone()[0];domain_ids.append(did)
+            db.execute("INSERT OR IGNORE INTO sample_domains(sample_id,domain_id,kind,created_at) VALUES(?,?,'manual',?)",(sample_id,did,now()))
+        for row in db.execute('SELECT domain_id FROM sample_domains WHERE sample_id=?',(sample_id,)).fetchall():
+            if row[0] not in domain_ids:db.execute('DELETE FROM sample_domains WHERE sample_id=? AND domain_id=?',(sample_id,row[0]))
+        db.execute('UPDATE sample_newsletters SET search_all_domains=? WHERE sample_id=?',(body.search_all_domains,sample_id))
+    db.execute('UPDATE subscriptions SET updated_at=? WHERE subscription_id=?',(now(),sid))
+    return detail(db,sid)
 
 @router.get('/{sid}/history')
 def history(sid: str,offset: int=Query(0,ge=0)):
