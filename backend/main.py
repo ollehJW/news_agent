@@ -1,3 +1,4 @@
+from backend.admin.news import router as admin_news_router
 from backend.feedback.routes import router as feedback_router, init_feedback_db
 from backend.admin.subscriptions import router as admin_subscriptions_router
 from backend.admin.dashboard import router as admin_router, init_admin_db
@@ -48,6 +49,7 @@ app.router.route_class = ErrorRoute
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(admin_subscriptions_router)
+app.include_router(admin_news_router)
 app.include_router(feedback_router)
 app.include_router(mail_router)
 app.include_router(workflow_router)
