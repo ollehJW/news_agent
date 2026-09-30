@@ -31,6 +31,6 @@
 
 .newsletter-archive .archive-preview-button{width:40px;height:40px;min-width:40px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:9px}
 
-.archive-row>.archive-row-actions{flex:0 0 auto;display:flex;gap:8px}
+.archive-row>.archive-row-actions{flex:0 0 auto;display:flex;align-items:center;gap:8px}
 
-.archive-subscriber-count{display:inline-flex;align-items:center;gap:5px;margin-top:7px;padding:4px 8px;border-radius:6px;background:#edf3fc;color:#305782;font-size:12px;font-weight:600}.archive-delete-button:hover:not(:disabled){border-color:#e4b8b8;background:#fff3f3;color:#aa3434}
+.archive-subscriber-count{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;margin-right:4px;padding:4px 8px;border-radius:6px;background:#edf3fc;color:#305782;font-size:12px;font-weight:600}.archive-delete-button:hover:not(:disabled){border-color:#e4b8b8;background:#fff3f3;color:#aa3434}
