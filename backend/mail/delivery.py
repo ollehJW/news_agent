@@ -111,7 +111,7 @@ def mail_tls_context():
     return context
 
 
-def deliver(sender,password,recipients,title,html,*,prepared=None):
+def deliver(sender,password,recipients,title,html,*,prepared=None,raw_html=False,text_body=None):
     recipients=list(dict.fromkeys(address.strip().casefold() for address in recipients))
     message=EmailMessage()
     message['From']=formataddr(('WiaNews',sender))
@@ -119,9 +119,9 @@ def deliver(sender,password,recipients,title,html,*,prepared=None):
     message['Subject']='[WiaNews] '+' '.join(title.split())
     message['Date']=formatdate(localtime=False)
     message['Message-ID']=make_msgid(domain=sender.split('@')[-1])
-    message.set_content('WiaNews 기술 뉴스레터입니다. HTML을 지원하는 메일 앱에서 확인해 주세요.')
+    message.set_content(text_body or 'WiaNews 기술 뉴스레터입니다. HTML을 지원하는 메일 앱에서 확인해 주세요.')
     sources,attachments=prepared if prepared is not None else prepare_inline_images(html)
-    message.add_alternative(email_html(html,sources),subtype='html')
+    message.add_alternative(html if raw_html else email_html(html,sources),subtype='html')
     html_part=message.get_payload()[-1]
     for image in attachments:
         html_part.add_related(image['data'],maintype='image',subtype='jpeg',

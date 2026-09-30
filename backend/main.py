@@ -1,3 +1,4 @@
+from backend.feedback.routes import router as feedback_router, init_feedback_db
 from backend.admin.subscriptions import router as admin_subscriptions_router
 from backend.admin.dashboard import router as admin_router, init_admin_db
 import asyncio
@@ -31,6 +32,7 @@ async def lifespan(app):
     init_mail_db()
     init_publication_db()
     init_admin_db()
+    init_feedback_db()
     scheduler=start_scheduler()
     publisher=start_publication_scheduler()
     try:
@@ -46,6 +48,7 @@ app.router.route_class = ErrorRoute
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(admin_subscriptions_router)
+app.include_router(feedback_router)
 app.include_router(mail_router)
 app.include_router(workflow_router)
 app.include_router(subscriptions_router)
@@ -62,7 +65,7 @@ async def csrf_guard(request: Request, call_next):
         if request.headers.get('X-WiaNews-Request') != '1':
             return JSONResponse({'detail': '허용되지 않은 요청입니다.'}, status_code=403)
     response = await call_next(request)
-    if request.url.path.startswith('/api/auth/') or request.url.path.startswith('/api/admin/'):
+    if request.url.path.startswith('/api/auth/') or request.url.path.startswith('/api/admin/') or request.url.path.endswith('/feedback'):
         response.headers['Cache-Control'] = 'no-store'
     return response
 
