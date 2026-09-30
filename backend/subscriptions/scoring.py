@@ -1,4 +1,5 @@
 """Evaluate unscored subscription articles using the shared article cache."""
+from backend.subscriptions.usage import subscription_sample_context
 import asyncio
 from backend.core.auth import database
 from backend.core.error_storage import record_error
@@ -16,6 +17,7 @@ async def score_sample_articles(sample_id,day,user_id):
             WHERE sa.sample_id=? ORDER BY sa.collected_at,a.article_id""",(sample_id,))]
     pending=[article for article in articles if not evaluation_complete(article)]
     if not pending:return {'evaluated_count':0,'reused_count':len(articles)}
+    usage_token=subscription_sample_context.set(sample_id)
     user_token=llm_user_context.set(user_id)
     collection_token=subscription_collection_context.set(None)
     async def progress(*args):pass
@@ -29,3 +31,4 @@ async def score_sample_articles(sample_id,day,user_id):
     finally:
         subscription_collection_context.reset(collection_token)
         llm_user_context.reset(user_token)
+        subscription_sample_context.reset(usage_token)

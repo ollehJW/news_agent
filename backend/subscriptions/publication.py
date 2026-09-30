@@ -1,4 +1,5 @@
 """Shared subscription editions and one durable email submission per subscription."""
+from backend.subscriptions.usage import subscription_sample_context
 import asyncio
 import calendar
 import json
@@ -205,6 +206,7 @@ def send_subscription_edition(job,sub,edition):
 async def publish_subscription(sid,day):
     job,sub=claim_job(sid,day)
     if not job:return
+    usage_token=subscription_sample_context.set(sub['sample_id'])
     token=llm_user_context.set(sub['user_id'])
     try:
         with database() as db:
@@ -234,4 +236,6 @@ async def publish_subscription(sid,day):
         record_error(sub['user_id'],'subscription_newsletter_publication',error)
         finish_job(job,'failed')
         raise
-    finally:llm_user_context.reset(token)
+    finally:
+        llm_user_context.reset(token)
+        subscription_sample_context.reset(usage_token)

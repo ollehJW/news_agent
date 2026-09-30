@@ -5,7 +5,7 @@ import { authRequest, postAuth } from './authApi';
 import './recipient-search.css';
 import TeamAutocomplete from './TeamAutocomplete';
 
-export default function RecipientSearchDialog({newsletter,onClose,onSelect,initialRecipients=[]}) {
+export default function RecipientSearchDialog({newsletter,onClose,onSelect,initialRecipients=[],directoryPath='/users/directory'}) {
   const dialog=useRef(null);
   const [tab,setTab]=useState('internal'),[externalEmail,setExternalEmail]=useState('');
   const identity=u=>u.user_id||`external:${u.email_address||u.email}`;
@@ -29,9 +29,9 @@ export default function RecipientSearchDialog({newsletter,onClose,onSelect,initi
   useEffect(()=>{const previous=document.activeElement;dialog.current.showModal();return()=>previous?.focus();},[]);
   useEffect(()=>{
     const controller=new AbortController();setLoading(true);setError('');
-    authRequest('/users/directory',{signal:controller.signal}).then(people=>{setUsers(people);if(onSelect)setChosen(current=>current.map(person=>(person.member_type==='external'?person:people.find(u=>u.user_id===person.user_id)||person)));}).catch(e=>{if(!controller.signal.aborted)setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
+    authRequest(directoryPath,{signal:controller.signal}).then(people=>{setUsers(people);if(onSelect)setChosen(current=>current.map(person=>(person.member_type==='external'?person:people.find(u=>u.user_id===person.user_id)||person)));}).catch(e=>{if(!controller.signal.aborted)setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return()=>controller.abort();
-  },[retry]);
+  },[retry,directoryPath]);
   const results=users.filter(u=>(u.team_name||'').includes(filter.team)&&((u.full_name||'').startsWith(filter.name)||u.employee_id.startsWith(filter.name)));
   const selected=new Set(chosen.map(identity));
   const available=results.filter(u=>u.email&&!selected.has(identity(u)));

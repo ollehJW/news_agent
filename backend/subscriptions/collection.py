@@ -1,4 +1,5 @@
 """Collect subscription articles once per sample/day, then evaluate missing scores."""
+from backend.subscriptions.usage import subscription_sample_context
 import asyncio
 import json
 import uuid
@@ -126,6 +127,7 @@ async def collect_sample(sample_id,day,user_id):
 async def _collect_sample(sample_id,day,user_id):
     run,config=claim_run(sample_id,day,user_id)
     if config is None:return public_run(run)
+    usage_token=subscription_sample_context.set(sample_id)
     user_token=llm_user_context.set(user_id)
     context_token=subscription_collection_context.set((run['run_id'],run['attempt_token']))
     stage='subscription_article_collection'
@@ -161,6 +163,7 @@ async def _collect_sample(sample_id,day,user_id):
         raise
     finally:
         subscription_collection_context.reset(context_token);llm_user_context.reset(user_token)
+        subscription_sample_context.reset(usage_token)
 
 
 def public_run(run):

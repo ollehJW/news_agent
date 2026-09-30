@@ -1,3 +1,4 @@
+from backend.admin.subscriptions import router as admin_subscriptions_router
 from backend.admin.dashboard import router as admin_router, init_admin_db
 import asyncio
 from contextlib import asynccontextmanager
@@ -44,6 +45,7 @@ app = FastAPI(title='WiaNews API', version='0.2.0', lifespan=lifespan)
 app.router.route_class = ErrorRoute
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(admin_subscriptions_router)
 app.include_router(mail_router)
 app.include_router(workflow_router)
 app.include_router(subscriptions_router)

@@ -127,6 +127,7 @@ def init_newsletter_db():
 
 
 def start_attempt(operation):
+    from backend.subscriptions.usage import subscription_sample_context
     sample_id = sample_context.get()
     user_id = llm_user_context.get()
     if not sample_id and not user_id:
@@ -138,6 +139,9 @@ def start_attempt(operation):
         db.execute('''INSERT INTO llm_requests
             (request_id,user_id,step,provider,model,started_at) VALUES (?,?,?,?,?,?)''',
             (request_id,user_id,step_name(operation),'azure_openai',os.getenv('OPENAI_MODEL',''),now()))
+        subscription_sample = subscription_sample_context.get()
+        if subscription_sample and operation.startswith('subscription_'):
+            db.execute('INSERT INTO subscription_llm_requests(request_id,sample_id) VALUES (?,?)', (request_id,subscription_sample))
         collection=subscription_collection_context.get()
         if collection:
             db.execute("UPDATE subscription_collection_runs SET request_id=? WHERE run_id=? AND attempt_token=? AND status='running'",(request_id,*collection))

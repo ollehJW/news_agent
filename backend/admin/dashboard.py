@@ -12,6 +12,8 @@ KST = ZoneInfo('Asia/Seoul')
 
 
 def init_admin_db():
+    from backend.subscriptions.usage import init_subscription_usage
+    init_subscription_usage()
     with database() as db:
         db.execute('''CREATE TABLE IF NOT EXISTS llm_pricing (
             provider TEXT NOT NULL, model TEXT NOT NULL,
@@ -100,17 +102,28 @@ def tally(items):
 
 
 @router.get('/tokens')
-def tokens(start: date, end: date, user_id: str = '', step: str = '', model: str = '', provider: str = '', offset: int = Query(0,ge=0)):
+def tokens(start: date, end: date, user_id: str = '', step: str = '', model: str = '', provider: str = '', subscription_id: str = '', offset: int = Query(0,ge=0)):
     bounds=period(start,end)
     with database() as db:
         options=dict(users=rows(db,'SELECT user_id,full_name,employee_id FROM users ORDER BY full_name'),
                      models=rows(db,'SELECT DISTINCT provider,model FROM llm_requests ORDER BY provider,model'),
                      steps=[r[0] for r in db.execute('SELECT DISTINCT step FROM llm_requests ORDER BY step')])
+        options['subscriptions']=rows(db,'''SELECT s.subscription_id,s.sample_id,
+            COALESCE(st.name,n.topic) AS name,u.full_name AS owner_name
+            FROM subscriptions s JOIN sample_details n USING(sample_id)
+            JOIN users u ON u.user_id=s.user_id LEFT JOIN subscription_settings st USING(subscription_id)
+            WHERE s.status='active' ORDER BY name,s.subscription_id''')
         prices=rows(db,'SELECT * FROM llm_pricing')
         clauses=['l.started_at>=?','l.started_at<?']; args=list(bounds)
         for key,value in [('user_id',user_id),('step',step),('model',model),('provider',provider)]:
             if value: clauses.append(f'l.{key}=?'); args.append(value)
+        if subscription_id:
+            selected=next((s for s in options['subscriptions'] if s['subscription_id']==subscription_id),None)
+            if not selected: raise HTTPException(404,'활성 구독을 찾을 수 없습니다.')
+            clauses.append('EXISTS(SELECT 1 FROM subscription_llm_requests sl WHERE sl.request_id=l.request_id AND sl.sample_id=?)')
+            args.append(selected['sample_id'])
         requests=rows(db,'''SELECT l.*,u.full_name,u.employee_id,
+            (SELECT sample_id FROM subscription_llm_requests sl WHERE sl.request_id=l.request_id) AS subscription_sample_id,
             EXISTS(SELECT 1 FROM errors e WHERE e.request_id=l.request_id) AS has_error
             FROM llm_requests l LEFT JOIN users u USING(user_id) WHERE '''+' AND '.join(clauses)+' ORDER BY l.started_at DESC',args)
     price_map={(p['provider'],p['model']):p for p in prices}
@@ -129,4 +142,7 @@ def tokens(start: date, end: date, user_id: str = '', step: str = '', model: str
     for kind, entries in groups.items():
         grouped[kind]=[dict(key=k,label=(f"{v[0]['full_name']} ({v[0]['employee_id']})" if kind=='users' else k),**tally(v)) for k,v in entries.items()]
         grouped[kind].sort(key=lambda x:x['key'] if kind=='daily' else -x['total_tokens'])
-    return dict(summary=tally(requests),groups=grouped,requests=requests[offset:offset+50],offset=offset,options=options,prices=prices)
+    grouped['subscriptions']=[dict(key=sub['subscription_id'],label=f"{sub['name']} · {sub['owner_name']}",
+        **tally([r for r in requests if r['subscription_sample_id']==sub['sample_id']]))
+        for sub in options['subscriptions'] if not subscription_id or sub['subscription_id']==subscription_id]
+    return dict(unlinked_subscription_calls=sum(r['step'].startswith('subscription_') and not r['subscription_sample_id'] for r in requests),summary=tally(requests),groups=grouped,requests=requests[offset:offset+50],offset=offset,options=options,prices=prices)
