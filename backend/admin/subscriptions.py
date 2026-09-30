@@ -23,9 +23,12 @@ def detail(db,sid):
     sub=active(db,sid)
     sample=db.execute('SELECT * FROM sample_details WHERE sample_id=?',(sub['sample_id'],)).fetchone()
     settings=db.execute('SELECT * FROM subscription_settings WHERE subscription_id=?',(sid,)).fetchone()
-    owner=db.execute('SELECT full_name,employee_id FROM users WHERE user_id=?',(sub['user_id'],)).fetchone()
+    owner=db.execute('''SELECT u.full_name,u.employee_id,t.name AS team_name,r.name AS role_name
+        FROM users u LEFT JOIN teams t USING(team_id) LEFT JOIN roles r USING(role_id)
+        WHERE u.user_id=?''',(sub['user_id'],)).fetchone()
     result={**dict(sub),**settings_info(settings,sample['topic']), 'topic':sample['topic'],
         'owner_name':owner['full_name'],'owner_employee_id':owner['employee_id'],
+        'owner_team_name':owner['team_name'],'owner_role_name':owner['role_name'],
         'members':members_info(db,sid),'search_all_domains':bool(sample['search_all_domains']),
         'queries':[r[0] for r in db.execute('SELECT query FROM sample_queries WHERE sample_id=? ORDER BY position',(sub['sample_id'],))],
         'domains':[r[0] for r in db.execute('SELECT d.host FROM sample_domains sd JOIN domains d USING(domain_id) WHERE sd.sample_id=? ORDER BY host',(sub['sample_id'],))],
