@@ -3,7 +3,7 @@ import {RefreshCw,MessageSquareText,Check,Pause,Mail,Loader2,X} from 'lucide-rea
 import {authRequest,postAuth} from './authApi';
 import './feedback.css';
 import FeedbackApply from './FeedbackApply';
-const names={pending:'검토 대기',held:'보류',completed:'반영'};
+const names={pending:'대기',held:'보류',completed:'반영'};
 const mails={processing:'메일 발송 중',sent:'결과 메일 발송 완료',failed:'메일 발송 실패',unknown:'메일 발송 결과 확인 필요'};
 const stamp=s=>new Date(s).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'});
 function Decision({item,status,onClose,onDone}){
