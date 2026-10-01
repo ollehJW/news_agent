@@ -33,7 +33,7 @@ function Login({onLogin,notice}) {
   const [employee,setEmployee]=useState('');const [password,setPassword]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);
   async function submit(e){e.preventDefault();setError('');setBusy(true);try{onLogin(await postAuth('/auth/login',{employee_id:employee.trim(),password}));}catch(err){setError(err.message);}finally{setBusy(false);}}
   return <div className="auth-page"><div className="login-layout"><section className="login-intro"><Brand/><div className="login-message"><span>YOUR WEEKLY TECH INTELLIGENCE</span><h1>기술의 흐름을,<br/>한눈에.</h1><p>신뢰할 수 있는 소식을 모아<br/>나에게 필요한 기술 인사이트로.</p></div><small>WiaNews · Designed for your next idea.</small></section>
-    <section className="auth-card login-card"><span className="auth-icon"><LockKeyhole size={26}/></span><h2>로그인</h2><p>사번과 비밀번호로 시작하세요.</p><form onSubmit={submit}><fieldset disabled={busy}>
+    <section className="auth-card login-card"><a className="login-intro-return" href="#">← 서비스 소개</a><span className="auth-icon"><LockKeyhole size={26}/></span><h2>로그인</h2><p>사번과 비밀번호로 시작하세요.</p><form onSubmit={submit}><fieldset disabled={busy}>
       <label>사번<input autoComplete="username" autoFocus required maxLength={40} placeholder="사번을 입력하세요" value={employee} onChange={e=>setEmployee(e.target.value)}/></label>
       <label>비밀번호<input type="password" autoComplete="current-password" required maxLength={128} placeholder="비밀번호를 입력하세요" value={password} onChange={e=>setPassword(e.target.value)}/></label>
       {(error||notice)&&<p className="auth-error" role="alert">{error||notice}</p>}

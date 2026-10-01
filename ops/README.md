@@ -103,3 +103,9 @@ systemctl --user restart wianews-backend wianews-frontend
   실패가 확인된 최신 결과만 관리자 재발송 버튼을 제공합니다. 결과 불명은 자동 재발송하지 않습니다.
   프로세스 재시작 시 중단된 `processing` 알림은 `unknown`으로 표시합니다.
 - `sent`는 SMTP 서버 수락 기준이며, 수신함 도착이나 열람을 보장하지 않습니다.
+
+## 서비스 소개 페이지
+
+기본 주소 `/`는 로그인 여부와 관계없이 소개 페이지를 보여줍니다. `/#app`의 시작하기 경로에서 기존 로그인 및 서비스 화면을 엽니다.
+
+소개 영상과 PPT가 준비되면 `frontend/public/media/wianews-intro.mp4`, `frontend/public/guides/wianews-guide.pptx` 등에 파일을 넣고 `frontend/src/introContent.js`의 `videoUrl`, `guideUrl`을 각각 `/media/wianews-intro.mp4`, `/guides/wianews-guide.pptx`로 설정합니다. `npm run build --prefix frontend`로 배포하면 영상 재생 및 PPT 다운로드가 활성화됩니다. URL이 `null`인 동안에는 준비 중 상태를 표시합니다. 소개 자료는 로그인 없이 접근할 수 있으므로 공개 가능한 자료를 등록합니다.

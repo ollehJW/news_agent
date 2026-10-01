@@ -10,6 +10,7 @@ import './subject-validation.css';
 import NewsSelection from './NewsSelection';
 import { collectSample } from './collectionApi';
 import AuthGate from './Auth';
+import Introduction from './Introduction';
 import { authRequest, postAuth } from './authApi';
 import './styles.css';
 import './scheduling.css';
@@ -225,4 +226,9 @@ function App({user,onLogout}) {
     {toast&&<div className="toast" role="status"><Check size={17}/>{toast}</div>}
   </div>;
 }
-createRoot(document.getElementById('root')).render(<AuthGate>{(user,onLogout)=><App key={user.user_id} user={user} onLogout={onLogout}/>}</AuthGate>);
+function Entry(){
+  const [inApp,setInApp]=useState(()=>window.location.hash==='#app');
+  useEffect(()=>{const navigate=()=>{setInApp(window.location.hash==='#app');if(window.location.hash==='#app')window.scrollTo(0,0);};window.addEventListener('hashchange',navigate);return()=>window.removeEventListener('hashchange',navigate);},[]);
+  return inApp?<AuthGate>{(user,onLogout)=><App key={user.user_id} user={user} onLogout={onLogout}/>}</AuthGate>:<Introduction/>;
+}
+createRoot(document.getElementById('root')).render(<Entry/>);
