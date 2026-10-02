@@ -26,12 +26,12 @@ def init_feedback_db():
             user_id TEXT REFERENCES users(user_id) ON DELETE SET NULL,
             requester_name TEXT NOT NULL,requester_email TEXT NOT NULL,
             subscription_name TEXT NOT NULL,topic TEXT NOT NULL,
-            conditions_json TEXT NOT NULL CHECK(json_valid(conditions_json) AND json_type(conditions_json)='object'),content TEXT NOT NULL,
+            conditions_json TEXT NOT NULL CHECK((conditions_json IS JSON) AND jsonb_typeof(conditions_json::jsonb)='object'),content TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','completed','held')),
             revision INTEGER NOT NULL DEFAULT 0,
             response TEXT,handled_by TEXT REFERENCES users(user_id) ON DELETE SET NULL,
             created_at TEXT NOT NULL,handled_at TEXT,
-            notifications_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(notifications_json) AND json_type(notifications_json)='array'))''')
+            notifications_json TEXT NOT NULL DEFAULT '[]' CHECK((notifications_json IS JSON) AND jsonb_typeof(notifications_json::jsonb)='array'))''')
         db.execute('CREATE INDEX IF NOT EXISTS feedback_status_created ON subscription_feedback(status,created_at)')
         # A process may have stopped after SMTP accepted the message. Do not resend.
         for row in db.execute("SELECT feedback_id,notifications_json FROM subscription_feedback"):
@@ -65,7 +65,7 @@ class FeedbackBody(BaseModel):
 def create_feedback(sid: str,body: FeedbackBody,user=Depends(member_user)):
     fid=str(body.request_id)
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         sub=db.execute(f"SELECT s.* FROM subscriptions s WHERE s.subscription_id=? AND s.status!='cancelled' AND {ACCESS}",(sid,user['user_id'],user['user_id'])).fetchone()
         if not sub:raise HTTPException(404,'피드백을 요청할 수 있는 구독을 찾을 수 없습니다.')
         existing=db.execute('SELECT * FROM subscription_feedback WHERE feedback_id=?',(fid,)).fetchone()
@@ -149,7 +149,7 @@ def send_notification(fid,event_id):
 def decide(fid: str,body: DecisionBody,user=Depends(admin_user)):
     event_id=str(body.request_id)
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         row=db.execute('SELECT * FROM subscription_feedback WHERE feedback_id=?',(fid,)).fetchone()
         if not row:raise HTTPException(404,'피드백을 찾을 수 없습니다.')
         events=json.loads(row['notifications_json'])
@@ -185,7 +185,7 @@ class RetryBody(BaseModel):
 @router.post('/admin/feedback/{fid}/retry-email')
 def retry_email(fid: str,body: RetryBody,user=Depends(admin_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         row=db.execute('SELECT * FROM subscription_feedback WHERE feedback_id=?',(fid,)).fetchone()
         if not row:raise HTTPException(404,'피드백을 찾을 수 없습니다.')
         events=json.loads(row['notifications_json']);event=events[-1] if events else None

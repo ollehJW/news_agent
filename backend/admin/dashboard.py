@@ -61,7 +61,7 @@ def operations(start: date, end: date):
     bounds = period(start, end)
     with database() as db:
         snapshot = {key: db.execute(sql).fetchone()[0] for key, sql in {
-            'users': 'SELECT count(*) FROM users WHERE is_admin=0 AND is_active=1',
+            'users': 'SELECT count(*) FROM users WHERE is_admin=FALSE AND is_active=TRUE',
             'samples': 'SELECT count(*) FROM sample_newsletters WHERE saved_at IS NOT NULL',
             'subscriptions': "SELECT count(*) FROM subscriptions WHERE status='active'",
             'members': "SELECT count(*) FROM subscription_members m JOIN subscriptions s USING(subscription_id) WHERE s.status='active' AND m.status='active'",
@@ -80,7 +80,7 @@ def operations(start: date, end: date):
             (SELECT count(*) FROM sample_runs r WHERE r.user_id=u.user_id AND r.started_at>=? AND r.started_at<?) AS samples,
             (SELECT count(*) FROM llm_requests l WHERE l.user_id=u.user_id AND l.started_at>=? AND l.started_at<?) AS calls,
             (SELECT count(*) FROM subscriptions s WHERE s.user_id=u.user_id AND s.status!='cancelled') AS subscriptions
-            FROM users u JOIN teams t USING(team_id) WHERE u.is_admin=0
+            FROM users u JOIN teams t USING(team_id) WHERE u.is_admin=FALSE
             ORDER BY samples DESC,calls DESC,u.full_name''', bounds+bounds)
         error_count=db.execute('SELECT count(*) FROM errors WHERE created_at>=? AND created_at<?',bounds).fetchone()[0]
         errors=rows(db, '''SELECT e.error_id,e.step,e.error_type,e.message,e.created_at,u.full_name

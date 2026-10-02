@@ -119,7 +119,7 @@ def list_samples(user=Depends(member_user)):
 @router.get('/sample-runs')
 def list_sample_runs(user=Depends(member_user)):
     with database() as db:
-        return [dict(r) for r in db.execute('SELECT * FROM sample_runs WHERE user_id=? ORDER BY started_at DESC,rowid DESC LIMIT 200',(user['user_id'],))]
+        return [dict(r) for r in db.execute('SELECT * FROM sample_runs WHERE user_id=? ORDER BY started_at DESC,entry_seq DESC LIMIT 200',(user['user_id'],))]
 
 
 @router.get('/samples/{sample_id}')
@@ -156,12 +156,12 @@ def set_sources(sample_id: str, body: SourcesBody, user=Depends(member_user)):
         if current is None or (item.recommendation_id and not current.recommendation_id):
             unique[item.host]=item
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         owned_sample(db, sample_id, user['user_id'])
         sid,_=editable_sample(db,sample_id)
         prepare_configuration(db,sid)
         if body.search_all_domains is not None:
-            db.execute('UPDATE sample_newsletters SET search_all_domains=? WHERE sample_id=?',(body.search_all_domains,sid))
+            db.execute('UPDATE sample_newsletters SET search_all_domains=? WHERE sample_id=?',(int(body.search_all_domains),sid))
         chosen=[]
         for item in unique.values():
             did=shared_domain(db,item.host)
@@ -203,7 +203,7 @@ def set_period(sample_id: str, body: PeriodBody, user=Depends(member_user)):
     if body.start > body.end:
         raise HTTPException(400, '수집 시작일과 종료일을 확인해 주세요.')
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         owned_sample(db,sample_id,user['user_id'])
         sid,_=editable_sample(db,sample_id)
         prepare_configuration(db,sid)
@@ -219,7 +219,7 @@ class SelectionBody(BaseModel):
 @router.put('/samples/{sample_id}/selection')
 def set_selection(sample_id: str, body: SelectionBody, user=Depends(member_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         owned_sample(db,sample_id,user['user_id'])
         existing={r[0] for r in db.execute('SELECT article_id FROM sample_articles WHERE sample_id=?',(sample_id,))}
         chosen=list(dict.fromkeys(body.article_ids))
@@ -244,7 +244,7 @@ def sample_subscription_info(db,sample_id):
         FROM subscriptions s JOIN subscription_members m USING(subscription_id)
         LEFT JOIN users u ON u.user_id=m.user_id
         WHERE s.sample_id=? AND s.status='active' AND m.status='active'
-        AND (m.member_type='external' OR (u.is_active=1 AND u.is_admin=0))
+        AND (m.member_type='external' OR (u.is_active=TRUE AND u.is_admin=FALSE))
         AND trim(COALESCE(u.email,m.email_address,''))!=''""",(sample_id,)).fetchone()[0]
     return {'subscriber_count':count,'has_subscriptions':linked,'can_delete':not linked}
 
@@ -283,7 +283,7 @@ async def make_newsletter(sample_id: str, user=Depends(member_user)):
         async with asyncio.timeout(125):
             total_summary,request_id=await generate_newsletter_summary(sample['topic'],issues)
         with database() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.execute("SELECT pg_advisory_xact_lock(741902630)")
             if summary_input(db,sample_id,user['user_id'])[2]!=revision:
                 raise HTTPException(409,'생성 중 기사 선택이나 설정이 변경되었습니다. 다시 생성해 주세요.')
             html=render_newsletter(title=sample['topic'],
@@ -322,7 +322,7 @@ def list_newsletters(user=Depends(member_user)):
 @router.post('/newsletters/{sample_id}/save')
 def save_newsletter(sample_id: str, user=Depends(member_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         row=owned_newsletter(db,sample_id,user['user_id'])
         if not row['saved_at']:
             db.execute('UPDATE sample_newsletters SET saved_at=? WHERE sample_id=?',(now(),sample_id))
@@ -353,7 +353,7 @@ def list_errors(user=Depends(member_user)):
 @router.delete('/newsletters/{sample_id}')
 def remove_saved_newsletter(sample_id: str,user=Depends(member_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         owned_newsletter(db,sample_id,user['user_id'])
         if not sample_subscription_info(db,sample_id)['can_delete']:
             raise HTTPException(409,'연결된 구독이 있어 삭제할 수 없습니다. 일시정지된 구독도 먼저 해제해 주세요.')

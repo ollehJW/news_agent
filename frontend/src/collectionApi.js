@@ -1,5 +1,6 @@
+import { serviceUrl } from './serviceUrl.js';
 export async function collectSample(sampleId,onProgress,signal) {
-  const response=await fetch(`/api/samples/${encodeURIComponent(sampleId)}/collect`,{
+  const response=await fetch(serviceUrl(`/api/samples/${encodeURIComponent(sampleId)}/collect`),{
     method:'POST',credentials:'same-origin',headers:{'X-WiaNews-Request':'1'},signal,
   });
   if(!response.ok||!response.body||!response.headers.get('content-type')?.includes('text/event-stream')){

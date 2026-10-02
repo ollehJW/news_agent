@@ -30,7 +30,7 @@ def snapshot(db,sid,uid):
 
 def save_result(sid,uid,revision,articles,scores):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         if snapshot(db,sid,uid)[3]!=revision:raise HTTPException(409,'수집 중 샘플 설정이 변경되었습니다. 변경된 설정으로 다시 수집해 주세요.')
         target,_=editable_sample(db,sid)
         db.execute('DELETE FROM sample_issues WHERE sample_id=?',(target,))
@@ -110,7 +110,7 @@ async def collect(sample_id:str,user=Depends(tracked_member_user)):
         raise HTTPException(400,'수집 쿼리, 도메인, 기간을 먼저 설정해 주세요.')
     if sample_id in _active:raise HTTPException(409,'이 샘플의 수집이 이미 진행 중입니다.')
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         target,_=editable_sample(db,sample_id)
         current=dict(owned_sample(db,target,user['user_id']))
         if target==sample_id and (current['current_step'] in ('news_collection','news_preprocessing','news_scoring','news_selection') or current['run_status'] in ('failed','cancelled')):

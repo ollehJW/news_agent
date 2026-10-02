@@ -30,6 +30,7 @@ const server=https.createServer(options,async(req,res)=>{
     req.on('aborted',()=>upstream.destroy());res.on('close',()=>{if(!res.writableEnded)upstream.destroy();});req.pipe(upstream);return;
   }
   if(!['GET','HEAD'].includes(req.method))return error(res,405,'Method not allowed');
+  if(pathname==='/agent/'){res.writeHead(308,{'Location':'/agent'+new URL(req.url,'https://localhost').search,'Cache-Control':'no-store'});res.end();return;}
   if(pathname.split('/').some(part=>part.startsWith('.')))return error(res,404,'Not found');
   try{
     let filename=resolve(root,'.'+pathname);

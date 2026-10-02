@@ -17,10 +17,7 @@ def init_exa_usage():
         db.execute('CREATE INDEX IF NOT EXISTS exa_usage_run ON exa_search_usage(run_id)')
         # Historical samples did not persist raw search counts; never infer them
         # from retained articles. Only existing subscription counts can be recovered.
-        db.execute('''INSERT OR IGNORE INTO exa_search_usage
-            SELECT 'legacy:'||r.run_id,r.user_id,r.sample_id,'subscription',r.run_id,r.search_results,r.started_at
-            FROM subscription_collection_runs r WHERE r.search_results>0
-            AND NOT EXISTS(SELECT 1 FROM exa_search_usage e WHERE e.run_id=r.run_id)''')
+        db.execute("INSERT INTO exa_search_usage\n            SELECT 'legacy:'||r.run_id,r.user_id,r.sample_id,'subscription',r.run_id,r.search_results,r.started_at\n            FROM subscription_collection_runs r WHERE r.search_results>0\n            AND NOT EXISTS(SELECT 1 FROM exa_search_usage e WHERE e.run_id=r.run_id) ON CONFLICT DO NOTHING")
 
 
 def record_results(count):

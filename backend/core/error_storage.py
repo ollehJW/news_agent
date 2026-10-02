@@ -1,6 +1,6 @@
 """Per-user workflow errors without prompts, credentials, or provider payloads."""
 import logging
-import sqlite3
+import psycopg
 import uuid
 from fastapi import Depends, HTTPException, Request
 from fastapi.routing import APIRoute
@@ -30,7 +30,7 @@ def record_error(user_id, step, error, request_id=None):
             db.execute('INSERT INTO errors (error_id,user_id,step,error_type,message,request_id,created_at) VALUES (?,?,?,?,?,?,?)',
                        (str(uuid.uuid4()),user_id,step,type(error).__name__,message,request_id,now()))
         error._wianews_error_logged = True
-    except sqlite3.Error:
+    except psycopg.Error:
         # Failure to record an error must not replace the original failure.
         log.error('Could not persist workflow error (step=%s, type=%s)', step, type(error).__name__)
 

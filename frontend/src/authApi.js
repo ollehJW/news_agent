@@ -1,5 +1,6 @@
+import { serviceUrl } from './serviceUrl.js';
 export async function authRequest(path, options = {}) {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(serviceUrl(`/api${path}`), {
     credentials: 'same-origin', ...options,
     headers: { 'Content-Type': 'application/json', 'X-WiaNews-Request': '1', ...options.headers },
   });

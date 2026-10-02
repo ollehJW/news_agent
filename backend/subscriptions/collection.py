@@ -30,14 +30,14 @@ def configuration(db,sample_id):
 
 def active_subscriptions(db,sample_id):
     return db.execute("""SELECT s.* FROM subscriptions s JOIN users u USING(user_id)
-        WHERE s.sample_id=? AND s.status='active' AND u.is_active=1
+        WHERE s.sample_id=? AND s.status='active' AND u.is_active=TRUE
         ORDER BY s.created_at,s.subscription_id""",(sample_id,)).fetchall()
 
 
 def claim_run(sample_id,day,user_id):
     stamp=now();expired=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         if not any(s['user_id']==user_id for s in active_subscriptions(db,sample_id)):
             raise HTTPException(409,'활성 구독이 있어야 수집할 수 있습니다.')
         # Reclaim interrupted processes after the bounded 360-second execution window.
@@ -78,7 +78,7 @@ def recent_history(sample_id,started_at):
         known={canonical_url(r[0]) for r in db.execute('SELECT a.url FROM subscripted_articles sa JOIN articles a USING(article_id) WHERE sa.sample_id=?',(sample_id,))}
         history=[dict(r) for r in db.execute('''SELECT a.title,a.published_at,a.url,a.highlights
             FROM subscripted_articles sa JOIN articles a USING(article_id)
-            WHERE sa.sample_id=? AND julianday(sa.collected_at)>=julianday(?) AND julianday(sa.collected_at)<=julianday(?)
+            WHERE sa.sample_id=? AND CAST(sa.collected_at AS timestamptz)>=CAST(? AS timestamptz) AND CAST(sa.collected_at AS timestamptz)<=CAST(? AS timestamptz)
             ORDER BY sa.collected_at,a.article_id''',(sample_id,cutoff,started_at))]
     return known,history
 
@@ -86,7 +86,7 @@ def recent_history(sample_id,started_at):
 def save_candidates(run,config,retained,request_id,counts):
     stamp=now();saved=[]
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         current=db.execute('SELECT * FROM subscription_collection_runs WHERE run_id=?',(run['run_id'],)).fetchone()
         if not current or current['status']!='running' or current['attempt_token']!=run['attempt_token']:
             raise HTTPException(409,'수집 실행이 만료되었습니다.')

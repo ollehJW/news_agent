@@ -28,7 +28,7 @@ def write_members(db,sid,members):
     normalized={}
     for member in members:
         if member.member_type=='internal':
-            user=db.execute("SELECT user_id FROM users WHERE user_id=? AND is_active=1 AND is_admin=0",(member.user_id,)).fetchone()
+            user=db.execute("SELECT user_id FROM users WHERE user_id=? AND is_active=TRUE AND is_admin=FALSE",(member.user_id,)).fetchone()
             if not user:raise HTTPException(422,'활성 사내 사용자를 선택해 주세요.')
         key=(member.member_type,member.user_id or member.email_address)
         normalized[key]=member

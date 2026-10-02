@@ -44,7 +44,7 @@ def store_evaluation(article,score):
     record['image_url']=article_image_url(article.get('image_url'),article.get('favicon_url'))
     record['highlights']=json.dumps(article['highlights'],ensure_ascii=False) if article.get('highlights') is not None else None
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         existing=decode(db.execute('SELECT * FROM articles WHERE url=?',(record['url'],)).fetchone())
         if existing and evaluation_complete(existing):return existing
         record['domain_id']=resolve_article_domain(db,record)

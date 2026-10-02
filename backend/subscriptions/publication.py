@@ -43,7 +43,7 @@ def due_publications(clock=None):
     with database() as db:
         rows=db.execute("""SELECT s.*,st.frequency,st.weekdays,st.month_day,st.start_date
             FROM subscriptions s JOIN subscription_settings st USING(subscription_id)
-            JOIN users u USING(user_id) WHERE s.status='active' AND u.is_active=1""").fetchall()
+            JOIN users u USING(user_id) WHERE s.status='active' AND u.is_active=TRUE""").fetchall()
         due=[]
         for row in rows:
             # A subscription created after today's 08:00 starts on its next scheduled date.
@@ -61,11 +61,11 @@ def due_publications(clock=None):
 def claim_job(sid,day):
     stamp=now();token=str(uuid.uuid4())
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         sub=db.execute("""SELECT s.*,st.name,st.frequency,st.weekdays,st.month_day,st.start_date,d.topic
             FROM subscriptions s JOIN subscription_settings st USING(subscription_id)
             JOIN sample_details d ON d.sample_id=s.sample_id JOIN users u ON u.user_id=s.user_id
-            WHERE s.subscription_id=? AND s.status='active' AND u.is_active=1""",(sid,)).fetchone()
+            WHERE s.subscription_id=? AND s.status='active' AND u.is_active=TRUE""",(sid,)).fetchone()
         if not sub:return None,None
         if not matches_day(sub,day):return None,None
         existing=db.execute('SELECT * FROM subscription_publication_jobs WHERE subscription_id=? AND scheduled_date=?',(sid,day.isoformat())).fetchone()
@@ -95,7 +95,7 @@ def recipients_for_subscription(db,sid):
         CASE WHEN m.member_type='internal' THEN u.email ELSE m.email_address END AS email_address,
         CASE WHEN m.member_type='internal' THEN u.full_name ELSE m.email_address END AS name
         FROM subscription_members m LEFT JOIN users u USING(user_id)
-        WHERE m.subscription_id=? AND m.status='active' AND (m.member_type='external' OR (u.is_active=1 AND u.is_admin=0))
+        WHERE m.subscription_id=? AND m.status='active' AND (m.member_type='external' OR (u.is_active=TRUE AND u.is_admin=FALSE))
         ORDER BY m.member_type,m.member_id""",(sid,)).fetchall()
     recipients=[]
     for row in rows:
@@ -147,7 +147,7 @@ async def get_edition(sub,day):
         summary,summary_request=await generate_newsletter_summary(sub['topic'],issues,operation='subscription_newsletter_summary')
         html=render_newsletter(title=sub['topic'],dates={'start':start.isoformat(),'end':end.isoformat()},issues=issues,total_summary=summary)
         with database() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.execute("SELECT pg_advisory_xact_lock(741902630)")
             saved=existing_edition(db,sub['sample_id'],start,end)
             if saved:return saved
             stamp=now();nid=str(uuid.uuid4());ids=[]
@@ -173,9 +173,9 @@ def send_subscription_edition(job,sub,edition):
     sender,password=mail.mail_settings()
     prepared=mail.prepare_inline_images(edition['html_content'])
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         if not job_current(db,job):raise HTTPException(409,'발행 작업이 만료되었습니다.')
-        active=db.execute("SELECT s.* FROM subscriptions s JOIN users u USING(user_id) WHERE s.subscription_id=? AND s.status='active' AND u.is_active=1",(sub['subscription_id'],)).fetchone()
+        active=db.execute("SELECT s.* FROM subscriptions s JOIN users u USING(user_id) WHERE s.subscription_id=? AND s.status='active' AND u.is_active=TRUE",(sub['subscription_id'],)).fetchone()
         if not active:return None
         recipients=recipients_for_subscription(db,sub['subscription_id'])
         if not recipients:return None
@@ -199,7 +199,7 @@ def send_subscription_edition(job,sub,edition):
     accepted=any(r['status']=='sent' for r in results)
     with database() as db:
         db.execute("UPDATE mailing SET results_json=?,status='completed',sent_at=?,completed_at=? WHERE mailing_id=?",(json.dumps(results,ensure_ascii=False),stamp if accepted else None,stamp,mid))
-        if accepted:db.execute('INSERT OR IGNORE INTO subscription_history(subscription_id,newsletter_id,created_at) VALUES(?,?,?)',(sub['subscription_id'],edition['newsletter_id'],stamp))
+        if accepted:db.execute('INSERT INTO subscription_history(subscription_id,newsletter_id,created_at) VALUES(?,?,?) ON CONFLICT DO NOTHING',(sub['subscription_id'],edition['newsletter_id'],stamp))
         return dict(db.execute('SELECT * FROM mailing WHERE mailing_id=?',(mid,)).fetchone())
 
 

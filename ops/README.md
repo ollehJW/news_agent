@@ -1,6 +1,7 @@
 # WiaNews 운영
 
-- 접속 주소: https://dev-axforwork.wia.co.kr:9802
+- 접속 주소: https://dev-axforwork.wia.co.kr/wianews/ (AX for Works 게이트웨이)
+- 기존 주소: https://dev-axforwork.wia.co.kr:9802 (계속 사용 가능)
 - 프론트엔드: 빌드된 React 파일을 HTTPS 9802 포트로 제공하고 `/api` 요청을 백엔드로 전달합니다. 스트리밍 응답도 그대로 전달합니다.
 - 백엔드: `127.0.0.1:9801`. 외부에서는 프론트엔드의 HTTPS 주소로 API를 사용합니다.
 - `wia` 사용자 systemd 서비스입니다. linger가 활성화되어 로그아웃 이후와 재부팅 후에도 실행됩니다. 프로세스 종료 시 5초 후 다시 시작합니다.
@@ -106,6 +107,16 @@ systemctl --user restart wianews-backend wianews-frontend
 
 ## 서비스 소개 페이지
 
-기본 주소 `/`는 로그인 여부와 관계없이 소개 페이지를 보여줍니다. `/#app`의 시작하기 경로에서 기존 로그인 및 서비스 화면을 엽니다.
+소개 페이지는 `https://dev-axforwork.wia.co.kr/wianews/`이며, 서비스 페이지는 `https://dev-axforwork.wia.co.kr/wianews/agent`입니다. 시작하기 링크에서 서비스 화면을 엽니다. 로그인하지 않았다면 서비스 주소에서 로그인 화면이 표시됩니다. 기존 `/wianews/#app` 북마크는 `/wianews/agent`로 자동 전환됩니다. 기존 9802 포트에서도 `/`는 소개, `/agent`는 서비스 화면입니다.
 
 소개 영상과 PPT가 준비되면 `frontend/public/media/wianews-intro.mp4`, `frontend/public/guides/wianews-guide.pptx` 등에 파일을 넣고 `frontend/src/introContent.js`의 `videoUrl`, `guideUrl`을 각각 `/media/wianews-intro.mp4`, `/guides/wianews-guide.pptx`로 설정합니다. `npm run build --prefix frontend`로 배포하면 영상 재생 및 PPT 다운로드가 활성화됩니다. URL이 `null`인 동안에는 준비 중 상태를 표시합니다. 소개 자료는 로그인 없이 접근할 수 있으므로 공개 가능한 자료를 등록합니다.
+
+## AX for Works 하위 경로
+
+포털이 `/wianews/` 요청을 이 서비스의 9802 포트로 전달합니다.
+프론트엔드는 상대 자산 경로와 `src/serviceUrl.js`를 사용해 `/wianews/api`, `/wianews/media` 요청을 생성합니다.
+기존 포트의 루트 주소에서는 기존 `/api`, `/media` 경로를 사용합니다.
+게이트웨이가 로그인 쿠키 경로를 보정하므로 새 주소에서는 다시 로그인합니다.
+일반 프론트엔드 빌드/배포 절차는 동일합니다.
+
+게이트웨이 대상 주소·경로는 `../ax_for_works/config/config.yaml`에서 관리하며 저장 후 자동 반영됩니다.

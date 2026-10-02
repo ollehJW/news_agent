@@ -1,3 +1,4 @@
+import { serviceUrl } from './serviceUrl.js';
 import { normalizeDomain } from './lib.js';
 
 function parseDomain(domain) {
@@ -8,7 +9,7 @@ function parseDomain(domain) {
 }
 
 export async function streamRecommendedDomains(topic, signal, onDomain, sampleId, onQuery=()=>{}, onQueries=()=>{}) {
-  const response = await fetch('/api/domains/recommend/stream', {
+  const response = await fetch(serviceUrl('/api/domains/recommend/stream'), {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-WiaNews-Request': '1' },
     body: JSON.stringify({ topic, sample_id: sampleId }), signal,
   });

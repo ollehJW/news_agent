@@ -24,35 +24,8 @@ router=APIRouter(prefix='/api/newsletter-email',route_class=ErrorRoute)
 
 
 def init_mail_db():
-    with database() as db:
-        db.execute('BEGIN IMMEDIATE')
-        for statement in Path(__file__).with_name('schema.sql').read_text().split(';'):
-            if statement.strip():db.execute(statement)
-        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='newsletter_email_requests'").fetchone():
-            for row in db.execute('SELECT * FROM newsletter_email_requests').fetchall():
-                results=json.loads(row['results_json'])
-                names={r['user_id']:r.get('name') for r in results}
-                # Legacy records never captured email addresses or SMTP acceptance times.
-                recipients=[{'user_id':uid,'name':names.get(uid),'email':None} for uid in json.loads(row['recipient_ids'])]
-                db.execute("""INSERT INTO mailing (mailing_id,user_id,request_id,kind,newsletter_id,
-                    mailing_list,results_json,status,created_at,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (str(uuid.uuid4()),row['user_id'],row['request_id'],row['kind'],row['newsletter_id'],
-                     json.dumps(recipients,ensure_ascii=False),row['results_json'],row['status'],row['created_at'],row['completed_at']))
-            db.execute('DROP TABLE newsletter_email_requests')
-        if 'subscription_id' not in {r['name'] for r in db.execute('PRAGMA table_info(mailing)')}:
-            db.execute('ALTER TABLE mailing ADD COLUMN subscription_id TEXT REFERENCES subscriptions(subscription_id) ON DELETE RESTRICT')
-        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS mailing_subscription_edition ON mailing(subscription_id,newsletter_id) WHERE subscription_id IS NOT NULL')
-        for row in db.execute('SELECT mailing_id,mailing_list,results_json FROM mailing').fetchall():
-            recipients=json.loads(row['mailing_list']);results=json.loads(row['results_json'])
-            changed=False
-            for recipient in recipients+results:
-                if 'member_type' not in recipient or 'email' in recipient:
-                    recipient['member_type']='internal' if recipient.get('user_id') else 'external'
-                    recipient['email_address']=recipient.pop('email',recipient.get('email_address'))
-                    changed=True
-            if changed:
-                db.execute('UPDATE mailing SET mailing_list=?,results_json=? WHERE mailing_id=?',
-                    (json.dumps(recipients,ensure_ascii=False),json.dumps(results,ensure_ascii=False),row['mailing_id']))
+    from backend.pgstore import initialize
+    initialize()
 
 
 
@@ -157,7 +130,7 @@ def send_newsletter(body: SendBody,user=Depends(tracked_member_user)):
     members={recipient_key(m.model_dump()):m for m in body.members()}
     keys=sorted(members)
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         existing=db.execute('SELECT * FROM mailing WHERE user_id=? AND request_id=?',
             (user['user_id'],body.request_id)).fetchone()
         if existing:
@@ -170,7 +143,7 @@ def send_newsletter(body: SendBody,user=Depends(tracked_member_user)):
         for key in keys:
             member=members[key]
             if member.member_type=='internal':
-                row=db.execute('SELECT user_id,full_name,email FROM users WHERE user_id=? AND is_active=1 AND is_admin=0',(member.user_id,)).fetchone()
+                row=db.execute('SELECT user_id,full_name,email FROM users WHERE user_id=? AND is_active=TRUE AND is_admin=FALSE',(member.user_id,)).fetchone()
                 if not row or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',row['email'] or ''):
                     raise HTTPException(422,'이메일이 없거나 사용할 수 없는 수신자가 있습니다. 선택 목록을 확인해 주세요.')
                 recipients.append({'member_type':'internal','user_id':row['user_id'],'name':row['full_name'],'email_address':row['email'].strip().lower()})

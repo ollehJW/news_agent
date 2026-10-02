@@ -31,9 +31,6 @@ async def lifespan(app):
     init_db()
     init_newsletter_db()
     init_mail_db()
-    init_publication_db()
-    init_admin_db()
-    init_feedback_db()
     scheduler=start_scheduler()
     publisher=start_publication_scheduler()
     try:
@@ -114,3 +111,8 @@ async def recommend(request: RecommendationRequest, user=Depends(member_user)):
         raise recommendation_failure(sample_id,error,502, '유효한 추천 결과를 받지 못했습니다. 다시 시도해 주세요.') from None
     finally:
         sample_context.reset(token)
+
+@app.get('/api/platform-auth')
+def platform_auth():
+    from backend.pgstore import settings
+    return {'platform_origin': settings()['auth']['platform_origin']}

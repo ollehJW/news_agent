@@ -1,3 +1,5 @@
+import { PlatformReturnLink, PlatformHomeLink } from './PlatformNavigation.jsx';
+import { serviceUrl } from './serviceUrl.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { UserRound, ArrowRight, ArrowLeft, Check, ChevronRight, Plus, X, Sparkles, Globe2, FileText, Layers3, Search, CalendarClock, CalendarDays, Download, ExternalLink, Loader2, CircleHelp, SlidersHorizontal, Bookmark, RotateCcw, Radio, Hash, CheckCheck } from 'lucide-react';
@@ -171,7 +173,7 @@ function App({user,onLogout}) {
   async function download(letter=generated) {
     if(!letter)return;
     setPending(true);
-    try{const response=await fetch(`/api/newsletters/${letter.id}/download`);if(!response.ok){if(response.status===401)window.dispatchEvent(new Event('wianews-session-expired'));throw new Error('다운로드하지 못했습니다. 다시 시도해 주세요.');}const url=URL.createObjectURL(await response.blob());const a=document.createElement('a');a.href=url;a.download='wianews.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setToast('HTML 파일을 다운로드했습니다.');}catch(err){setError(err.message);}finally{setPending(false);}
+    try{const response=await fetch(serviceUrl(`/api/newsletters/${letter.id}/download`));if(!response.ok){if(response.status===401)window.dispatchEvent(new Event('wianews-session-expired'));throw new Error('다운로드하지 못했습니다. 다시 시도해 주세요.');}const url=URL.createObjectURL(await response.blob());const a=document.createElement('a');a.href=url;a.download='wianews.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setToast('HTML 파일을 다운로드했습니다.');}catch(err){setError(err.message);}finally{setPending(false);}
   }
   async function save() {
     if(!generated)return;
@@ -186,7 +188,7 @@ function App({user,onLogout}) {
       <nav><button className={view==='studio'?'active':''} onClick={()=>{setView('studio');setOpened(null)}}><Sparkles size={17}/>뉴스레터 만들기<ChevronRight size={14}/></button><button className={view==='archive'?'active':''} onClick={()=>{setView('archive');setOpened(null)}}><Bookmark size={17}/>뉴스레터 보관함</button><button className={view==='schedules'?'active':''} onClick={()=>{setView('schedules');setOpened(null)}}><CalendarClock size={17}/>구독 관리</button></nav>
       <div className="side-bottom"><div className="profile"><span aria-hidden="true"><UserRound size={20}/></span><div>{user.full_name}<small>{user.team_name}</small></div><span className="online"/></div><button className="sidebar-logout" onClick={onLogout}>로그아웃</button></div>
     </aside>
-    <div className="main-shell"><header className="topbar"><div>Workspace<ChevronRight size={13}/><strong>{view==='studio'?'뉴스레터 만들기':view==='schedules'?'구독 관리':'뉴스레터 보관함'}</strong></div></header>
+    <div className="main-shell"><header className="topbar"><div><PlatformHomeLink/><ChevronRight size={13}/><span>WiaNews</span><ChevronRight size={13}/><strong>{view==='studio'?'뉴스레터 만들기':view==='schedules'?'구독 관리':'뉴스레터 보관함'}</strong></div><PlatformReturnLink/></header>
     <main>
       <div className="page-heading"><div><div className="eyebrow">YOUR WEEKLY TECH INTELLIGENCE</div><h1>{view==='schedules'?'구독 관리':view==='archive'?'뉴스레터 보관함':'기술의 흐름을, 한눈에.'}</h1><p>{view==='schedules'?'관심 있는 뉴스레터를 구독하고, 원하는 발행 주기를 설정하세요.':view==='archive'?'직접 만든 샘플과 구독으로 받아본 뉴스레터를 확인하세요.':'관심 있는 주제 하나를 알려주세요. 꼭 알아야 할 기술 소식을 Agent가 정리합니다.'}</p></div></div>
       {error&&<p className="error" role="alert">{error}</p>}
@@ -227,8 +229,21 @@ function App({user,onLogout}) {
   </div>;
 }
 function Entry(){
-  const [inApp,setInApp]=useState(()=>window.location.hash==='#app');
-  useEffect(()=>{const navigate=()=>{setInApp(window.location.hash==='#app');if(window.location.hash==='#app')window.scrollTo(0,0);};window.addEventListener('hashchange',navigate);return()=>window.removeEventListener('hashchange',navigate);},[]);
-  return inApp?<AuthGate>{(user,onLogout)=><App key={user.user_id} user={user} onLogout={onLogout}/>}</AuthGate>:<Introduction/>;
+  const isAgentPage=()=>window.location.pathname===serviceUrl('/agent')||window.location.hash==='#app';
+  const [inApp,setInApp]=useState(isAgentPage);
+  useEffect(()=>{
+    const navigate=()=>{
+      // Preserve old bookmarks while presenting a real service URL.
+      if(window.location.hash==='#app')window.history.replaceState(null,'',serviceUrl('/agent')+window.location.search);
+      const active=window.location.pathname===serviceUrl('/agent');
+      setInApp(active);
+      if(active)window.scrollTo(0,0);
+    };
+    navigate();
+    window.addEventListener('popstate',navigate);
+    window.addEventListener('hashchange',navigate);
+    return()=>{window.removeEventListener('popstate',navigate);window.removeEventListener('hashchange',navigate);};
+  },[]);
+  return <AuthGate>{(user,onLogout)=>inApp?<App key={user.user_id} user={user} onLogout={onLogout}/>:<Introduction/>}</AuthGate>;
 }
 createRoot(document.getElementById('root')).render(<Entry/>);

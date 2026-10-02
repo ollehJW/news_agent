@@ -1,10 +1,10 @@
+import { PlatformReturnLink, PlatformHomeLink } from './PlatformNavigation.jsx';
 import React, {useEffect, useState} from 'react';
-import {Newspaper, MessageSquareText, Radio, Activity, Coins, Users, Layers3, UserRound, ChevronRight, LogOut, RefreshCw, Loader2, Settings2, X} from 'lucide-react';
+import {Newspaper, MessageSquareText, Radio, Activity, Coins, Layers3, UserRound, ChevronRight, LogOut, RefreshCw, Loader2, Settings2, X} from 'lucide-react';
 import AdminNews from './AdminNews';
 import AdminFeedback from './AdminFeedback';
 import AdminSelect from './AdminSelect';
 import AdminSubscriptions from './AdminSubscriptions';
-import AccountManagement from './AccountManagement';
 import {authRequest} from './authApi';
 import './admin.css';
 
@@ -60,6 +60,6 @@ function Dashboard({mode}){
  {pricing&&data&&<Pricing data={data} onClose={()=>setPricing(false)} onSaved={()=>setRevision(v=>v+1)}/>}</main>;
 }
 export default function AdminWorkspace({user,onLogout}){
- const [view,setView]=useState('accounts');const nav=[['accounts','계정 관리',Users],['operations','운영 관리',Activity],['tokens','토큰 관리',Coins],['subscriptions','구독 관리',Radio],['news','뉴스 관리',Newspaper],['feedback','피드백 관리',MessageSquareText]];const title=nav.find(n=>n[0]===view)[1];
- return <div className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-icon"><Layers3 size={24}/></span><div>WiaNews<small>ADMIN WORKSPACE</small></div></div><div className="workspace-label">ADMINISTRATION</div><nav>{nav.map(([key,label,Icon])=><button key={key} className={view===key?'active':''} aria-current={view===key?'page':undefined} onClick={()=>setView(key)}><Icon size={17}/>{label}<ChevronRight size={14}/></button>)}</nav><div className="side-bottom"><div className="profile"><span><UserRound size={20}/></span><div>{user.full_name}<small>관리자</small></div></div><button className="sidebar-logout" onClick={onLogout}><LogOut size={16}/>로그아웃</button></div></aside><div className="main-shell"><header className="topbar"><div>Workspace<ChevronRight size={13}/><strong>{title}</strong></div><span className="demo-badge">관리자</span></header>{view==='accounts'?<AccountManagement user={user} onLogout={onLogout}/>:view==='news'?<AdminNews/>:view==='feedback'?<AdminFeedback/>:view==='subscriptions'?<AdminSubscriptions/>:<Dashboard key={view} mode={view}/>}</div></div>;
+ const [view,setView]=useState('operations');const nav=[['operations','운영 관리',Activity],['tokens','토큰 관리',Coins],['subscriptions','구독 관리',Radio],['news','뉴스 관리',Newspaper],['feedback','피드백 관리',MessageSquareText]];const title=nav.find(n=>n[0]===view)[1];
+ return <div className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-icon"><Layers3 size={24}/></span><div>WiaNews<small>ADMIN WORKSPACE</small></div></div><div className="workspace-label">ADMINISTRATION</div><nav>{nav.map(([key,label,Icon])=><button key={key} className={view===key?'active':''} aria-current={view===key?'page':undefined} onClick={()=>setView(key)}><Icon size={17}/>{label}<ChevronRight size={14}/></button>)}</nav><div className="side-bottom"><div className="profile"><span><UserRound size={20}/></span><div>{user.full_name}<small>관리자</small></div></div><button className="sidebar-logout" onClick={onLogout}><LogOut size={16}/>로그아웃</button></div></aside><div className="main-shell"><header className="topbar"><div><PlatformHomeLink/><ChevronRight size={13}/><span>WiaNews</span><ChevronRight size={13}/><strong>{title}</strong></div><div className="platform-topbar-actions"><span className="demo-badge">관리자</span><PlatformReturnLink/></div></header>{view==='news'?<AdminNews/>:view==='feedback'?<AdminFeedback/>:view==='subscriptions'?<AdminSubscriptions/>:<Dashboard key={view} mode={view}/>}</div></div>;
 }

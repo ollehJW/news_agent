@@ -63,7 +63,7 @@ def directory():
     with database() as db:
         return [dict(r) for r in db.execute('''SELECT u.user_id,u.employee_id,u.full_name,u.email,t.name AS team_name,r.name AS role_name
             FROM users u LEFT JOIN teams t USING(team_id) LEFT JOIN roles r USING(role_id)
-            WHERE u.is_active=1 AND u.is_admin=0 ORDER BY t.name,u.full_name,u.employee_id''')]
+            WHERE u.is_active=TRUE AND u.is_admin=FALSE ORDER BY t.name,u.full_name,u.employee_id''')]
 
 
 @router.get('/{sid}')
@@ -84,7 +84,7 @@ class MembersUpdate(BaseModel):
 @router.put('/{sid}/members')
 def update_members(sid: str,body: MembersUpdate):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         current=detail(db,sid);check_revision(current,body.revision)
         existing={(m['member_type'],m['user_id'] or m['email_address']):m for m in current['members']}
         incoming={}
@@ -93,7 +93,7 @@ def update_members(sid: str,body: MembersUpdate):
             if key in incoming:raise HTTPException(422,'중복된 구독자가 있습니다.')
             incoming[key]=m
             if m.member_type=='internal' and key not in existing:
-                if not db.execute('SELECT 1 FROM users WHERE user_id=? AND is_active=1 AND is_admin=0',(m.user_id,)).fetchone():
+                if not db.execute('SELECT 1 FROM users WHERE user_id=? AND is_active=TRUE AND is_admin=FALSE',(m.user_id,)).fetchone():
                     raise HTTPException(422,'활성 일반 사용자를 선택해 주세요.')
         for key,m in existing.items():
             if key not in incoming:db.execute('DELETE FROM subscription_members WHERE member_id=?',(m['member_id'],))
@@ -146,7 +146,7 @@ class PublicationUpdate(SettingsBody,SourceConditions):
 @router.put('/{sid}/settings')
 def update_publication(sid: str,body: PublicationUpdate):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         return update_publication_in_db(db,sid,body)
 
 
@@ -170,10 +170,10 @@ def update_publication_in_db(db,sid,body):
         for host in body.domains:
             db.execute('INSERT INTO domains(domain_id,host,created_at) VALUES(?,?,?) ON CONFLICT(host) DO NOTHING',(str(uuid.uuid4()),host,now()))
             did=db.execute('SELECT domain_id FROM domains WHERE host=?',(host,)).fetchone()[0];domain_ids.append(did)
-            db.execute("INSERT OR IGNORE INTO sample_domains(sample_id,domain_id,kind,created_at) VALUES(?,?,'manual',?)",(sample_id,did,now()))
+            db.execute("INSERT INTO sample_domains(sample_id,domain_id,kind,created_at) VALUES(?,?,'manual',?) ON CONFLICT DO NOTHING",(sample_id,did,now()))
         for row in db.execute('SELECT domain_id FROM sample_domains WHERE sample_id=?',(sample_id,)).fetchall():
             if row[0] not in domain_ids:db.execute('DELETE FROM sample_domains WHERE sample_id=? AND domain_id=?',(sample_id,row[0]))
-        db.execute('UPDATE sample_newsletters SET search_all_domains=? WHERE sample_id=?',(body.search_all_domains,sample_id))
+        db.execute('UPDATE sample_newsletters SET search_all_domains=? WHERE sample_id=?',(int(body.search_all_domains),sample_id))
     db.execute('UPDATE subscriptions SET updated_at=? WHERE subscription_id=?',(now(),sid))
     return detail(db,sid)
 
@@ -183,7 +183,7 @@ def history(sid: str,offset: int=Query(0,ge=0)):
         active(db,sid)
         count=db.execute('SELECT count(*) FROM subscription_publication_jobs WHERE subscription_id=?',(sid,)).fetchone()[0]
         jobs=[dict(r) for r in db.execute('''SELECT j.job_id,j.scheduled_date,j.status,j.attempt,j.newsletter_id,j.started_at,j.completed_at,
-            n.coverage_start_date,n.coverage_end_date,n.published_at,json_array_length(n.issue_ids) AS article_count
+            n.coverage_start_date,n.coverage_end_date,n.published_at,jsonb_array_length(n.issue_ids::jsonb) AS article_count
             FROM subscription_publication_jobs j LEFT JOIN subscripted_newsletters n USING(newsletter_id)
             WHERE j.subscription_id=? ORDER BY j.scheduled_date DESC LIMIT 50 OFFSET ?''',(sid,offset))]
         for job in jobs:
@@ -193,7 +193,7 @@ def history(sid: str,offset: int=Query(0,ge=0)):
             job['mail_status']=m['status'] if m else None
         # Include legacy/manual editions that have delivery history without a job.
         delivered=[dict(r) for r in db.execute('''SELECT n.newsletter_id,n.coverage_start_date,n.coverage_end_date,n.published_at,h.created_at,
-            json_array_length(n.issue_ids) AS article_count FROM subscription_history h JOIN subscripted_newsletters n USING(newsletter_id)
+            jsonb_array_length(n.issue_ids::jsonb) AS article_count FROM subscription_history h JOIN subscripted_newsletters n USING(newsletter_id)
             WHERE h.subscription_id=? ORDER BY h.created_at DESC LIMIT 50 OFFSET ?''',(sid,offset))]
         delivered_count=db.execute('SELECT count(*) FROM subscription_history WHERE subscription_id=?',(sid,)).fetchone()[0]
     return dict(jobs=jobs,total=count,delivered=delivered,delivered_total=delivered_count,offset=offset)

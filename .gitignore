@@ -11,3 +11,6 @@ backend/logs/
 backend/app.db*
 
 backend/workspace/
+
+/config.yaml
+/backups/

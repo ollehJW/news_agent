@@ -17,7 +17,7 @@ def due_jobs(clock=None):
         subscriptions=db.execute("""SELECT s.sample_id,s.user_id,s.created_at,st.start_date
             FROM subscriptions s JOIN users u USING(user_id)
             LEFT JOIN subscription_settings st USING(subscription_id)
-            WHERE s.status='active' AND u.is_active=1 ORDER BY s.created_at,s.subscription_id""").fetchall()
+            WHERE s.status='active' AND u.is_active=TRUE ORDER BY s.created_at,s.subscription_id""").fetchall()
         grouped={}
         for sub in subscriptions:
             created=datetime.fromisoformat(sub['created_at']).astimezone(KST).date()

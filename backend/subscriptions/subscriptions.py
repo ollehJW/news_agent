@@ -155,7 +155,7 @@ def marketplace(user=Depends(member_user)):
                 FROM subscriptions s JOIN subscription_members m USING(subscription_id)
                 LEFT JOIN users u ON u.user_id=m.user_id
                 WHERE s.sample_id=? AND s.status='active' AND m.status='active'
-                AND (m.member_type='external' OR u.is_active=1)
+                AND (m.member_type='external' OR u.is_active=TRUE)
                 AND trim(COALESCE(u.email,m.email_address,''))!=''""",(sid,)).fetchone()[0]
             publication_schedules=[]
             seen_schedules=set()
@@ -192,7 +192,7 @@ def subscription_archive(response: Response,user=Depends(member_user)):
             WHERE {ACCESS} ORDER BY name,s.subscription_id""",(user['user_id'],user['user_id'])).fetchall()
         editions=db.execute(f"""SELECT h.subscription_id,n.newsletter_id AS id,
             d.topic AS title,n.coverage_start_date,n.coverage_end_date,n.published_at,
-            h.created_at AS received_at,json_array_length(n.issue_ids) AS count
+            h.created_at AS received_at,jsonb_array_length(n.issue_ids::jsonb) AS count
             FROM subscription_history h
             JOIN subscriptions s USING(subscription_id)
             JOIN subscripted_newsletters n ON n.newsletter_id=h.newsletter_id AND n.sample_id=s.sample_id
@@ -252,7 +252,7 @@ def preview_newsletter(sample_id: str,response: Response,newsletter_id: str | No
 @router.post('')
 def create_subscription(body: CreateBody,response: Response,user=Depends(member_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         sample=subscribable_sample(db,body.sample_id,user['user_id'])
         existing=db.execute('SELECT * FROM subscriptions WHERE sample_id=? AND user_id=?',(body.sample_id,user['user_id'])).fetchone()
         if existing and existing['status']!='cancelled':
@@ -295,7 +295,7 @@ def create_subscription(body: CreateBody,response: Response,user=Depends(member_
 @router.put('/{subscription_id}/settings')
 def update_settings(subscription_id: str,body: EditBody,user=Depends(member_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         row=owned_subscription(db,subscription_id,user['user_id'])
         if row['status']=='cancelled': raise HTTPException(409,'해지한 구독은 재구독 후 수정해 주세요.')
         if not db.execute('SELECT 1 FROM subscription_settings WHERE subscription_id=?',(subscription_id,)).fetchone():
@@ -310,7 +310,7 @@ def update_settings(subscription_id: str,body: EditBody,user=Depends(member_user
 def update_status(subscription_id: str,body: StatusBody,user=Depends(member_user)):
     if body.status!='cancelled':raise HTTPException(422,'멤버별 수신 상태를 변경해 주세요.')
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         owned_subscription(db,subscription_id,user['user_id'])
         db.execute('UPDATE subscriptions SET status=?,updated_at=? WHERE subscription_id=?',(body.status,now(),subscription_id))
         return subscription_info(db,owned_subscription(db,subscription_id,user['user_id']))
@@ -324,7 +324,7 @@ def cancel_subscription(subscription_id: str,user=Depends(member_user)):
 @router.delete('/{subscription_id}/members/me')
 def leave_subscription(subscription_id: str,user=Depends(member_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         row=db.execute('SELECT user_id FROM subscriptions WHERE subscription_id=?',(subscription_id,)).fetchone()
         if not row:raise HTTPException(404,'구독을 찾을 수 없습니다.')
         if row['user_id']==user['user_id']:
@@ -343,7 +343,7 @@ class RemoveMembersBody(BaseModel):
 @router.post('/{subscription_id}/members/remove')
 def remove_subscription_members(subscription_id: str,body: RemoveMembersBody,user=Depends(member_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         row=owned_subscription(db,subscription_id,user['user_id'])
         if row['status']=='cancelled':raise HTTPException(409,'이미 종료된 구독입니다.')
         members={r['member_id'] for r in db.execute('SELECT member_id FROM subscription_members WHERE subscription_id=?',(subscription_id,))}
@@ -364,7 +364,7 @@ class MemberStatusBody(BaseModel):
 @router.patch('/{subscription_id}/members/status')
 def update_member_status(subscription_id: str,body: MemberStatusBody,user=Depends(member_user)):
     with database() as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute("SELECT pg_advisory_xact_lock(741902630)")
         row=db.execute(f"SELECT s.* FROM subscriptions s WHERE s.subscription_id=? AND {ACCESS}",
             (subscription_id,user['user_id'],user['user_id'])).fetchone()
         if not row:raise HTTPException(404,'구독을 찾을 수 없습니다.')

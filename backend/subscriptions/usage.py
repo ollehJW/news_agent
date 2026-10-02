@@ -13,15 +13,4 @@ def init_subscription_usage():
         db.execute('CREATE INDEX IF NOT EXISTS subscription_llm_sample ON subscription_llm_requests(sample_id)')
         # Backfill only unambiguous persisted links. Reused global article scores must
         # not be attributed to every sample that later consumed the cached result.
-        db.execute('''INSERT OR IGNORE INTO subscription_llm_requests(request_id,sample_id)
-            SELECT x.request_id,min(x.sample_id) FROM (
-                SELECT request_id,sample_id FROM subscription_collection_runs
-                UNION SELECT request_id,sample_id FROM subscripted_articles
-                UNION SELECT n.request_id,n.sample_id FROM subscripted_newsletters n
-                UNION SELECT i.request_id,s.sample_id FROM subscripted_issues i
-                    JOIN subscriptions s USING(subscription_id)
-                UNION SELECT a.request_id,sa.sample_id FROM articles a
-                    JOIN subscripted_articles sa USING(article_id)
-            ) x JOIN llm_requests l ON l.request_id=x.request_id
-            WHERE l.step LIKE 'subscription_%'
-            GROUP BY x.request_id HAVING count(DISTINCT x.sample_id)=1''')
+        db.execute("INSERT INTO subscription_llm_requests(request_id,sample_id)\n            SELECT x.request_id,min(x.sample_id) FROM (\n                SELECT request_id,sample_id FROM subscription_collection_runs\n                UNION SELECT request_id,sample_id FROM subscripted_articles\n                UNION SELECT n.request_id,n.sample_id FROM subscripted_newsletters n\n                UNION SELECT i.request_id,s.sample_id FROM subscripted_issues i\n                    JOIN subscriptions s USING(subscription_id)\n                UNION SELECT a.request_id,sa.sample_id FROM articles a\n                    JOIN subscripted_articles sa USING(article_id)\n            ) x JOIN llm_requests l ON l.request_id=x.request_id\n            WHERE l.step LIKE 'subscription_%'\n            GROUP BY x.request_id HAVING count(DISTINCT x.sample_id)=1 ON CONFLICT DO NOTHING")

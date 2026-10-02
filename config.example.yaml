@@ -1,0 +1,17 @@
+# 운영 환경의 PostgreSQL 주소, DB명, 계정으로 수정 후 backend를 재시작하세요.
+# 업무 스키마와 계정 스키마는 고정입니다. 계정과 세션은 platform을 공통 사용합니다.
+database:
+  host: 127.0.0.1
+  port: 5432
+  name: wia_platform
+  user: wia_platform_admin
+  # 비밀번호는 서비스 환경변수에서 읽습니다. 직접 입력하려면 password_env를 지우고
+  # password: "비밀번호"를 사용하세요. 해당 파일은 Git에서 제외하고 chmod 600 하세요.
+  password_env: AX_DB_PASSWORD
+  sslmode: prefer
+  schema: wianews
+  account_schema: platform
+
+auth:
+  # 운영 도메인이 바뀌면 플랫폼과 두 서비스에서 함께 수정하세요.
+  platform_origin: https://dev-axforwork.wia.co.kr
