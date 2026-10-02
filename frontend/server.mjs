@@ -9,13 +9,15 @@ import {resolve,sep,extname} from 'node:path';
 const root=await realpath(fileURLToPath(new URL('./dist',import.meta.url)));
 const target=new URL(process.env.BACKEND_ORIGIN||'http://127.0.0.1:9801');
 if(target.protocol!=='http:'||!['127.0.0.1','localhost'].includes(target.hostname))throw new Error('Backend must be local HTTP');
-const options={cert:readFileSync(process.env.WIANEWS_TLS_CERT),key:readFileSync(process.env.WIANEWS_TLS_KEY),minVersion:'TLSv1.2'};
+const protocol=process.env.FRONTEND_PROTOCOL||'https';
+if(!['http','https'].includes(protocol))throw new Error('Invalid frontend protocol');
+const options=protocol==='https'?{cert:readFileSync(process.env.WIANEWS_TLS_CERT),key:readFileSync(process.env.WIANEWS_TLS_KEY),minVersion:'TLSv1.2'}:{};
 const mime={'.mp4':'video/mp4','.webm':'video/webm','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.ppt':'application/vnd.ms-powerpoint','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.ico':'image/x-icon','.woff':'font/woff','.woff2':'font/woff2'};
 const hop=new Set(['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade']);
 function headersWithoutHop(headers){const blocked=new Set([...hop,...String(headers.connection||'').toLowerCase().split(',').map(v=>v.trim())]);return Object.fromEntries(Object.entries(headers).filter(([key])=>!blocked.has(key)));}
 function error(res,status,message){if(res.headersSent){res.destroy();return;}res.writeHead(status,{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'});res.end(message);}
 
-const server=https.createServer(options,async(req,res)=>{
+const server=(protocol==='https'?https:http).createServer(options,async(req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');
   let pathname;
   try{pathname=decodeURIComponent(new URL(req.url,'https://localhost').pathname);}catch{return error(res,400,'Invalid URL');}
@@ -49,5 +51,5 @@ const server=https.createServer(options,async(req,res)=>{
   }catch{error(res,500,'Unable to serve frontend');}
 });
 server.requestTimeout=120000;
-server.listen(Number(process.env.FRONTEND_PORT||9802),process.env.FRONTEND_HOST||'0.0.0.0',()=>console.log('WiaNews HTTPS frontend listening on '+(process.env.FRONTEND_PORT||9802)));
+server.listen(Number(process.env.FRONTEND_PORT||9802),process.env.FRONTEND_HOST||'0.0.0.0',()=>console.log('WiaNews '+protocol.toUpperCase()+' frontend listening on '+(process.env.FRONTEND_PORT||9802)));
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),30000).unref();});

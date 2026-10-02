@@ -38,3 +38,7 @@ python -m backend.migrate_postgres --source backend/app.db --config config.yaml
 이전 app.db와 전환 전 소스는 백업으로 유지합니다. PostgreSQL 전환 뒤 새로 저장한 데이터가 있으므로
 단순히 SQLite 버전으로 되돌리지 마세요. 복구 시 쓰기 작업을 중단하고 최신 PostgreSQL 데이터를 먼저 보관해야 합니다.
 기존 SQLite 테스트/마이그레이션은 과거 버전 자료이며 현재 환경에서 실행하지 않습니다.
+
+## TLS 프록시 뒤의 Pod 실행
+
+기존 HTTPS 실행이 기본입니다. 앞단에서 HTTPS를 종료하는 H200 환경에서는 프론트에 `FRONTEND_PROTOCOL=http`, `FRONTEND_PORT`, `BACKEND_ORIGIN=http://127.0.0.1:<백엔드 포트>`를 지정할 수 있습니다. 외부 공개 도메인은 YAML의 `auth.platform_origin`으로 설정하고, 공통 로그인 쿠키는 Secure 속성을 유지합니다. `.env`와 `config.yaml`, 파일 데이터·로그는 `/data`에 보관하고 소스 디렉터리에서 링크합니다.
