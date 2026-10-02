@@ -138,7 +138,7 @@ async def get_edition(sub,day):
                 ORDER BY a.total_score DESC,a.published_at DESC,a.article_id''',(sub['sample_id'],start.isoformat(),end.isoformat()))]
         # Avoid silently issuing an incomplete edition while evaluation is still pending.
         if any(not evaluation_complete(a) for a in rows):raise HTTPException(409,'구독 기사 평가가 완료되지 않았습니다.')
-        candidates=[a for a in rows if a['total_score'] is not None and a['total_score']>=70][:50]
+        candidates=[a for a in rows if a['total_score'] is not None and a['total_score']>=50][:5]
         if not candidates:return None
         selected,request_id=await select_issues(sub['topic'],candidates)
         if not selected:return None
