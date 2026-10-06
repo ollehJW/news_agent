@@ -1,2 +1,5 @@
 node_modules/
 dist/
+
+# Guide PDF is managed in /data/wianews/media.
+/public/media/WIANews_Guide.pdf
