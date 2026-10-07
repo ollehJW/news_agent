@@ -53,14 +53,26 @@ def init_db():
     initialize()
 
 
-USER_QUERY = '''SELECT u.*, t.name AS team_name, r.name AS role_name
-                FROM users u JOIN teams t ON t.team_id=u.team_id JOIN roles r ON r.role_id=u.role_id'''
+USER_QUERY = '''SELECT u.*, COALESCE(t.name,'') AS team_name, COALESCE(r.name,'') AS role_name,
+                       COALESCE(o.name,'') AS organization
+                FROM users u LEFT JOIN teams t ON t.team_id=u.team_id
+                LEFT JOIN roles r ON r.role_id=u.role_id
+                LEFT JOIN platform.orgs o ON o.org_id=u.org_id'''
+
+
+def missing_profile_fields(user):
+    # Match the platform completion dialog: NULL, blank and legacy unassigned labels.
+    fields = ('full_name', 'organization', 'team_name', 'role_name', 'email')
+    return [field for field in fields
+            if ' '.join(unicodedata.normalize('NFKC', str(user.get(field) or '')).split()) in ('', '미지정')]
 
 
 def public_user(row):
-    return {k: row[k] for k in ('user_id', 'employee_id', 'full_name', 'team_id', 'team_name',
-            'role_id', 'role_name', 'is_admin', 'email', 'must_change_password', 'is_active',
+    result = {k: row[k] for k in ('user_id', 'employee_id', 'full_name', 'team_id', 'team_name',
+            'role_id', 'role_name', 'organization', 'is_admin', 'email', 'must_change_password', 'is_active',
             'created_at', 'updated_at', 'last_login_at', 'password_changed_at')}
+    result["missing_profile_fields"] = missing_profile_fields(result)
+    return result
 
 
 def token_hash(token):

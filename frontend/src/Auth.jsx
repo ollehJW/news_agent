@@ -5,7 +5,7 @@ import { serviceUrl } from './serviceUrl.js';
 import './auth.css';
 import AdminWorkspace from './AdminWorkspace';
 
-export async function goToPlatformLogin() {
+export async function goToPlatformLogin({ completeProfile = false } = {}) {
   // The backend reads this origin from config.yaml, including direct legacy-port access.
   const response = await fetch(serviceUrl('/api/platform-auth'), { credentials: 'same-origin' });
   if (!response.ok) throw new Error('통합 로그인 설정을 확인할 수 없습니다.');
@@ -14,7 +14,9 @@ export async function goToPlatformLogin() {
   const prefix = '/wianews';
   const path = window.location.pathname.startsWith(prefix + '/') ? window.location.pathname : prefix + window.location.pathname;
   const destination = path + window.location.search + window.location.hash;
-  window.location.replace(origin.origin + '/login?next=' + encodeURIComponent(destination));
+  const params = new URLSearchParams({ next: destination });
+  if (completeProfile) params.set('profile', 'complete');
+  window.location.replace(origin.origin + '/login?' + params.toString());
 }
 
 export default function AuthGate({ children }) {
@@ -22,12 +24,13 @@ export default function AuthGate({ children }) {
   const [notice, setNotice] = useState('');
   useEffect(() => {
     let active = true;
-    async function redirect() { try { await goToPlatformLogin(); } catch (e) { if(active) setNotice(e.message); } }
+    async function redirect(completeProfile = false) { try { await goToPlatformLogin({completeProfile}); } catch (e) { if(active) setNotice(e.message); } }
     async function refresh() {
       try {
         const value = await authRequest('/auth/me');
         if (!active) return;
-        if (value.must_change_password) { await redirect(); return; }
+        if (value.must_change_password) { setUser(null); await redirect(); return; }
+        if (!value.is_admin && value.missing_profile_fields?.length) { setUser(null); await redirect(true); return; }
         setUser(value); setNotice('');
       } catch (e) {
         if (!active) return;
